@@ -2,7 +2,7 @@ import { ServicePrice } from '../models/index';
 
 export interface CreatePriceRequest {
   service_name: string;
-  service_type: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit';
+  service_type: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit' | 'image_upscale';
   price: number;
   currency?: string;
   description?: string;
@@ -196,6 +196,12 @@ export class PriceService {
           service_type: 'video_edit' as const,
           price: 200,
           description: 'Автоматическое редактирование и обработка видео'
+        },
+        {
+          service_name: 'Увеличение изображений',
+          service_type: 'image_upscale' as const,
+          price: 50,
+          description: 'Увеличение разрешения изображений с помощью ИИ'
         }
       ];
 
@@ -219,5 +225,56 @@ export class PriceService {
     } catch (error) {
       console.error('Ошибка при инициализации дефолтных цен:', error);
     }
+  }
+
+  /**
+   * Получить цену увеличения изображения в зависимости от размеров и коэффициента
+   */
+  static async getUpscalePrice(originalWidth: number, originalHeight: number, scaleFactor: number): Promise<number | null> {
+    try {
+      // Базовая цена за увеличение изображения
+      const basePrice = await this.getServicePrice('image_upscale');
+      
+      // Вычисляем коэффициент сложности на основе размеров и коэффициента увеличения
+      const totalPixels = originalWidth * originalHeight;
+      const complexityFactor = this.calculateComplexityFactor(totalPixels, scaleFactor);
+      
+      const finalPrice = Math.round(basePrice * complexityFactor * 100) / 100; // Округляем до 2 знаков
+      
+      console.log(`💰 Рассчитана цена увеличения: ${finalPrice} (базовая: ${basePrice}, коэффициент: ${complexityFactor})`);
+      
+      return finalPrice;
+    } catch (error) {
+      console.error('Ошибка при расчете цены увеличения изображения:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Вычисляет коэффициент сложности для увеличения изображения
+   */
+  private static calculateComplexityFactor(totalPixels: number, scaleFactor: number): number {
+    // Базовый коэффициент
+    let factor = 1;
+    
+    // Коэффициент на основе размера исходного изображения
+    if (totalPixels > 4000000) { // >4MP
+      factor *= 2.0;
+    } else if (totalPixels > 2000000) { // >2MP
+      factor *= 1.5;
+    } else if (totalPixels > 1000000) { // >1MP
+      factor *= 1.2;
+    }
+    
+    // Коэффициент на основе коэффициента увеличения
+    if (scaleFactor >= 4) {
+      factor *= 2.5;
+    } else if (scaleFactor >= 3) {
+      factor *= 2.0;
+    } else if (scaleFactor >= 2) {
+      factor *= 1.5;
+    }
+    
+    return Math.max(factor, 0.5); // Минимальный коэффициент 0.5
   }
 }

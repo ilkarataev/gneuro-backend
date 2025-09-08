@@ -7,6 +7,7 @@ import { PhotoRestorationService } from './services/PhotoRestorationService';
 import { BalanceService } from './services/BalanceService';
 import pricesRouter from './routes/prices';
 import webhookRouter from './routes/webhook';
+import upscaleRouter from './routes/upscale';
 
 // Расширяем тип Request для multer
 interface MulterRequest extends Request {
@@ -71,6 +72,7 @@ app.get('/health', (req: Request, res: Response) => {
 // Подключаем роуты
 app.use('/api/prices', pricesRouter);
 app.use('/api/webhook', webhookRouter);
+app.use('/api/upscale', upscaleRouter);
 
 // Маршруты
 

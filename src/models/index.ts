@@ -87,7 +87,7 @@ interface ApiRequestCreationAttributes extends Optional<ApiRequestAttributes, 'i
 interface ServicePriceAttributes {
   id: number;
   service_name: string;
-  service_type: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit';
+  service_type: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit' | 'image_upscale';
   price: number;
   currency: string;
   is_active: boolean;
@@ -172,7 +172,7 @@ class ApiRequest extends Model<ApiRequestAttributes, ApiRequestCreationAttribute
 class ServicePrice extends Model<ServicePriceAttributes, ServicePriceCreationAttributes> implements ServicePriceAttributes {
   public id!: number;
   public service_name!: string;
-  public service_type!: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit';
+  public service_type!: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit' | 'image_upscale';
   public price!: number;
   public currency!: string;
   public is_active!: boolean;
