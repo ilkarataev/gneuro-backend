@@ -1,0 +1,42 @@
+{
+  "dependencies": {
+    "@google/genai": "^1.17.0",
+    "@telegram-apps/init-data-node": "^2.0.10",
+    "@types/axios": "^0.9.36",
+    "@types/dotenv": "^6.1.1",
+    "@types/multer": "^2.0.0",
+    "@types/sharp": "^0.31.1",
+    "axios": "^1.11.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.2",
+    "express": "^5.1.0",
+    "multer": "^2.0.2",
+    "mysql2": "^3.14.4",
+    "sequelize": "^6.37.7",
+    "sharp": "^0.34.3",
+    "tweetnacl": "^1.0.3",
+    "tweetnacl-util": "^0.15.1"
+  },
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "npm install sequelize mysql2 node js/migrate.js",
+  "main": "migrate.js",
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.3.1",
+    "nodemon": "^3.1.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.2"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "nodemon src/server.ts",
+    "start": "node dist/server.js",
+    "migrate": "ts-node src/migrate.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}

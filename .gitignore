@@ -1,0 +1,12 @@
+node_modules
+dist
+.env*
+.DS_Store
+.vscode
+npm-debug.log
+yarn-error.log
+.idea
+*.sqlite
+temp
+uploads
+logs

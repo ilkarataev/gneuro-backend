@@ -1,0 +1,2 @@
+# Запуск скрипта backup.sh каждый день в 2 часа ночи
+00 02 * * * /usr/local/bin/backup.sh >> /var/log/cron.log 2>&1
