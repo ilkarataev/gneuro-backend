@@ -11,15 +11,27 @@ export class FileManagerService {
   private static readonly BASE_UPLOADS_DIR = 'uploads';
 
   /**
-   * Создает структуру папок для пользователя и модуля
-   * Структура: uploads/{telegramId}/{moduleName}/
+   * Получает строку с текущей датой в формате YYYY-MM-DD
+   */
+  private static getCurrentDateString(): string {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  /**
+   * Создает структуру папок для пользователя и модуля с датой
+   * Структура: uploads/{telegramId}/{moduleName}/{YYYY-MM-DD}/
    */
   static createUserModuleDirectory(telegramId: number, moduleName: string): string {
-    const userModuleDir = path.join(this.BASE_UPLOADS_DIR, telegramId.toString(), moduleName);
+    const dateString = this.getCurrentDateString();
+    const userModuleDir = path.join(this.BASE_UPLOADS_DIR, telegramId.toString(), moduleName, dateString);
     
     if (!fs.existsSync(userModuleDir)) {
       fs.mkdirSync(userModuleDir, { recursive: true });
-      console.log('📁 Создана папка пользователя для модуля:', userModuleDir);
+      console.log('📁 Создана папка пользователя для модуля с датой:', userModuleDir);
     }
     
     return userModuleDir;
@@ -27,14 +39,15 @@ export class FileManagerService {
 
   /**
    * Создает папку для результатов обработки
-   * Структура: uploads/{telegramId}/{moduleName}/processed/
+   * Структура: uploads/{telegramId}/{moduleName}/{YYYY-MM-DD}/processed/
    */
   static createProcessedDirectory(telegramId: number, moduleName: string): string {
-    const processedDir = path.join(this.BASE_UPLOADS_DIR, telegramId.toString(), moduleName, 'processed');
+    const dateString = this.getCurrentDateString();
+    const processedDir = path.join(this.BASE_UPLOADS_DIR, telegramId.toString(), moduleName, dateString, 'processed');
     
     if (!fs.existsSync(processedDir)) {
       fs.mkdirSync(processedDir, { recursive: true });
-      console.log('📁 Создана папка для обработанных файлов:', processedDir);
+      console.log('📁 Создана папка для обработанных файлов с датой:', processedDir);
     }
     
     return processedDir;
@@ -59,8 +72,9 @@ export class FileManagerService {
   static createFileUrl(telegramId: number, moduleName: string, filename: string, subfolder?: string): string {
     const baseUrl = process.env.BASE_URL || 'http://localhost:3001';
     const cleanBaseUrl = baseUrl.replace(/\/api$/, ''); // Убираем /api если есть
+    const dateString = this.getCurrentDateString();
     
-    const pathParts = [telegramId.toString(), moduleName];
+    const pathParts = [telegramId.toString(), moduleName, dateString];
     if (subfolder) {
       pathParts.push(subfolder);
     }
