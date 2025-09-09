@@ -534,7 +534,8 @@ app.post('/api/photos/stylize', upload.single('photo'), async (req: MulterReques
     const result = await PhotoStylizationService.stylizePhoto({
       userId: parseInt(userId),
       telegramId: parseInt(telegramId),
-      imageUrl: finalPath, // Передаем локальный путь для чтения файла
+      imageUrl: imageFullUrl, // Передаем полный URL для сохранения в request_data
+      localPath: finalPath, // Передаем локальный путь для чтения файла
       styleId: styleId,
       prompt: finalPrompt,
       originalFilename: req.file.originalname
@@ -707,7 +708,7 @@ app.post('/api/photos/era-style', upload.single('photo'), async (req: MulterRequ
     const result = await EraStyleService.stylePhotoByEra({
       userId: parseInt(userId),
       telegramId: parseInt(telegramId),
-      imageUrl: finalPath,
+      imageUrl: imageFullUrl, // Передаем полный URL для сохранения в request_data
       eraId: eraId,
       prompt: finalPrompt,
       originalFilename: req.file.originalname

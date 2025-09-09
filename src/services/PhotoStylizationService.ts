@@ -11,7 +11,8 @@ import { FileManagerService } from './FileManagerService';
 export interface StylizePhotoRequest {
   userId: number;
   telegramId: number;
-  imageUrl: string;
+  imageUrl: string; // URL для сохранения в request_data
+  localPath?: string; // Локальный путь для чтения файла (опциональный)
   styleId: string;
   prompt: string;
   originalFilename: string;
@@ -156,7 +157,7 @@ export class PhotoStylizationService {
 
         // Отправляем запрос к Gemini API для стилизации
         console.log('🤖 [STYLIZE] Отправляем запрос к Gemini API...');
-        const styledImageBuffer = await this.callGeminiStyleAPI(request.imageUrl, request.prompt);
+        const styledImageBuffer = await this.callGeminiStyleAPI(request.localPath || request.imageUrl, request.prompt);
         
         // Сохраняем стилизованное изображение
         fs.writeFileSync(stylizedPath, styledImageBuffer);
@@ -227,7 +228,7 @@ export class PhotoStylizationService {
   /**
    * Вызов API Gemini для стилизации изображения
    */
-  private static async callGeminiStyleAPI(imageUrl: string, prompt: string): Promise<Buffer> {
+  private static async callGeminiStyleAPI(imagePath: string, prompt: string): Promise<Buffer> {
     try {
       console.log('🤖 [GEMINI] Инициализируем Gemini AI...');
       const genAI = new GoogleGenAI({ 
@@ -235,11 +236,22 @@ export class PhotoStylizationService {
       });
 
       // Читаем изображение
-      const imageBuffer = fs.readFileSync(imageUrl);
+      let imageBuffer: Buffer;
+      
+      if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+        console.log('🌐 [GEMINI] Загружаем изображение по URL:', imagePath);
+        // Скачиваем изображение по URL
+        const response = await axios.get(imagePath, { responseType: 'arraybuffer' });
+        imageBuffer = Buffer.from(response.data as ArrayBuffer);
+      } else {
+        console.log('📂 [GEMINI] Читаем локальный файл:', imagePath);
+        // Читаем локальный файл
+        imageBuffer = fs.readFileSync(imagePath);
+      }
       
       // Конвертируем в base64
       const imageBase64 = imageBuffer.toString('base64');
-      const mimeType = this.getMimeTypeFromPath(imageUrl);
+      const mimeType = this.getMimeTypeFromPath(imagePath);
 
       console.log('🖼️ [GEMINI] Отправляем изображение на стилизацию...');
       console.log('📝 [GEMINI] Промпт:', prompt.substring(0, 100) + '...');
