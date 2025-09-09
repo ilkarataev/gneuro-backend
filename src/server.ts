@@ -9,6 +9,7 @@ import { EraStyleService } from './services/EraStyleService';
 import { FileManagerService } from './services/FileManagerService';
 import { ImageGenerationService } from './services/ImageGenerationService';
 import { BalanceService } from './services/BalanceService';
+import { TelegramBotService } from './services/TelegramBotService';
 import pricesRouter from './routes/prices';
 import webhookRouter from './routes/webhook';
 
@@ -562,6 +563,100 @@ app.post('/api/photos/stylize', upload.single('photo'), async (req: MulterReques
     res.status(500).json({
       success: false,
       error: 'Произошла техническая ошибка. Попробуйте позже'
+    });
+  }
+});
+
+/**
+ * Создание подготовленного сообщения для отправки изображения через Mini App
+ */
+app.post('/api/telegram/prepare-photo-message', async (req: Request, res: Response) => {
+  try {
+    const { imageUrl, caption, userId } = req.body;
+
+    console.log('📤 [PREPARE] Создаем подготовленное сообщение');
+    console.log('📤 [PREPARE] imageUrl:', imageUrl);
+    console.log('📤 [PREPARE] caption:', caption);
+    console.log('📤 [PREPARE] userId:', userId);
+
+    // Валидация входных данных
+    if (!imageUrl) {
+      return res.status(400).json({
+        success: false,
+        error: 'imageUrl обязателен'
+      });
+    }
+
+    // Проверяем валидность URL
+    if (!TelegramBotService.isValidImageUrl(imageUrl)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Некорректный URL изображения. URL должен использовать HTTPS протокол'
+      });
+    }
+
+    // Создаем подготовленное сообщение
+    const preparedMessageId = await TelegramBotService.createPreparedPhotoMessage(
+      imageUrl,
+      caption || 'Изображение из нейросети',
+      userId
+    );
+
+    if (preparedMessageId) {
+      console.log('✅ [PREPARE] Подготовленное сообщение создано:', preparedMessageId);
+      
+      res.json({
+        success: true,
+        preparedMessageId,
+        message: 'Подготовленное сообщение создано успешно'
+      });
+    } else {
+      console.error('❌ [PREPARE] Не удалось создать подготовленное сообщение');
+      
+      res.status(500).json({
+        success: false,
+        error: 'Не удалось создать подготовленное сообщение. Попробуйте позже'
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ [PREPARE] Ошибка при создании подготовленного сообщения:', error);
+    
+    res.status(500).json({
+      success: false,
+      error: 'Произошла техническая ошибка при подготовке сообщения'
+    });
+  }
+});
+
+/**
+ * Проверка статуса Telegram бота
+ */
+app.get('/api/telegram/bot-status', async (req: Request, res: Response) => {
+  try {
+    console.log('🤖 [BOT-STATUS] Проверяем статус бота');
+
+    const botInfo = await TelegramBotService.getBotInfo();
+
+    if (botInfo) {
+      res.json({
+        success: true,
+        botInfo,
+        message: 'Бот активен и готов к работе'
+      });
+    } else {
+      res.status(503).json({
+        success: false,
+        error: 'Бот недоступен или неправильно настроен'
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ [BOT-STATUS] Ошибка при проверке статуса бота:', error);
+    
+    res.status(500).json({
+      success: false,
+      error: 'Произошла техническая ошибка при проверке бота'
     });
   }
 });
