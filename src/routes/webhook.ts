@@ -19,7 +19,13 @@ router.post('/leadtech', async (req, res) => {
   
   try {
     // В веб-хуке leadtech поле id является leadtech_contact_id
-    const { telegram_id, id: leadtech_contact_id } = req.body;
+    const { 
+      telegram_id, 
+      id: leadtech_contact_id, 
+      name, 
+      telegram_username,
+      email 
+    } = req.body;
     
     console.log(`📋 Извлечены данные: telegram_id=${telegram_id}, leadtech_contact_id=${leadtech_contact_id}`);
 
@@ -55,26 +61,37 @@ router.post('/leadtech', async (req, res) => {
     console.log(`🔍 Ищем пользователя с telegram_id: ${telegramIdNum}`);
 
     // Ищем пользователя по telegram_id
-    const user = await User.findOne({
+    let user = await User.findOne({
       where: { telegram_id: telegramIdNum }
     });
 
     if (!user) {
-      console.log(`❌ Пользователь с telegram_id ${telegramIdNum} не найден`);
-      return res.status(404).json({
-        success: false,
-        error: `Пользователь с telegram_id ${telegramIdNum} не найден`
+      console.log(`❌ Пользователь с telegram_id ${telegramIdNum} не найден, создаем нового...`);
+      
+      // Парсим имя пользователя из поля name
+      const nameParts = (name || '').trim().split(' ');
+      const firstName = nameParts[0] || null;
+      const lastName = nameParts.slice(1).join(' ') || null;
+      
+      // Создаем нового пользователя с данными из вебхука
+      user = await BalanceService.createUser({
+        id: telegramIdNum,
+        username: telegram_username || null,
+        firstName: firstName,
+        lastName: lastName
       });
+      
+      console.log(`✅ Создан новый пользователь: ID=${user!.id}, username=${user!.username}, name=${firstName} ${lastName}`);
+    } else {
+      console.log(`✅ Пользователь найден: ID=${user.id}, username=${user.username}`);
     }
 
-    console.log(`✅ Пользователь найден: ID=${user.id}, username=${user.username}`);
-
-    // Обновляем leadtech_contact_id
-    await user.update({
+    // Обновляем leadtech_contact_id (пользователь точно существует на этом этапе)
+    await user!.update({
       leadtech_contact_id: leadtechIdNum
     });
 
-    console.log(`✅ leadtech_contact_id успешно обновлен на ${leadtechIdNum} для пользователя ${user.id}`);
+    console.log(`✅ leadtech_contact_id успешно обновлен на ${leadtechIdNum} для пользователя ${user!.id}`);
 
     // Запускаем синхронизацию баланса с LeadTech
     console.log('🔄 Запускаем синхронизацию баланса с LeadTech...');
@@ -94,10 +111,10 @@ router.post('/leadtech', async (req, res) => {
       success: true,
       message: 'leadtech_contact_id успешно сохранен и баланс синхронизирован',
       data: {
-        user_id: user.id,
+        user_id: user!.id,
         telegram_id: telegramIdNum,
         leadtech_contact_id: leadtechIdNum,
-        username: user.username
+        username: user!.username
       }
     });
 
