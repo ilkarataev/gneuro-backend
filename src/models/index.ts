@@ -154,7 +154,7 @@ class ApiRequest extends Model<ApiRequestAttributes, ApiRequestCreationAttribute
   public user_id!: number;
   public photo_id?: number;
   public api_name!: string;
-  public request_type!: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit' | 'photo_stylize';
+  public request_type!: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit' | 'photo_stylize' | 'era_style';
   public request_data?: string;
   public response_data?: string;
   public prompt?: string;
@@ -172,7 +172,7 @@ class ApiRequest extends Model<ApiRequestAttributes, ApiRequestCreationAttribute
 class ServicePrice extends Model<ServicePriceAttributes, ServicePriceCreationAttributes> implements ServicePriceAttributes {
   public id!: number;
   public service_name!: string;
-  public service_type!: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit' | 'photo_stylize';
+  public service_type!: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit' | 'photo_stylize' | 'era_style';
   public price!: number;
   public currency!: string;
   public is_active!: boolean;
@@ -375,7 +375,7 @@ ApiRequest.init({
     allowNull: false
   },
   request_type: {
-    type: DataTypes.ENUM('photo_restore', 'image_generate', 'music_generate', 'video_edit', 'photo_stylize'),
+    type: DataTypes.ENUM('photo_restore', 'image_generate', 'music_generate', 'video_edit', 'photo_stylize', 'era_style'),
     allowNull: false
   },
   request_data: {
@@ -431,7 +431,7 @@ ServicePrice.init({
     allowNull: false,
   },
   service_type: {
-    type: DataTypes.ENUM('photo_restore', 'image_generate', 'music_generate', 'video_edit', 'photo_stylize'),
+    type: DataTypes.ENUM('photo_restore', 'image_generate', 'music_generate', 'video_edit', 'photo_stylize', 'era_style'),
     allowNull: false
   },
   price: {
