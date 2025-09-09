@@ -212,8 +212,8 @@ app.post('/api/photos/restore', upload.single('photo'), async (req: MulterReques
     console.log('📸 [RESTORE] Начинаем процесс реставрации фото');
     console.log('📸 [RESTORE] userId (database):', userId);
     console.log('📸 [RESTORE] telegramId:', telegramId);
-    console.log('📸 [RESTORE] moduleName:', moduleName);
-    console.log('📸 [RESTORE] options:', options);
+    console.log('📸 [RESTORE] moduleName:', moduleName, 'Тип:', typeof moduleName);
+    console.log('📸 [RESTORE] options:', options, 'Тип:', typeof options);
     console.log('📸 [RESTORE] file:', req.file ? req.file.filename : 'отсутствует');
     
     if (!req.file) {
@@ -228,10 +228,17 @@ app.post('/api/photos/restore', upload.single('photo'), async (req: MulterReques
       return res.status(400).json({ error: 'telegramId обязателен' });
     }
 
-    // Перемещаем файл из временной папки в правильную структуру папок
     // Используем telegramId и moduleName для создания папки
     const fs = require('fs');
-    const module = moduleName || 'photo_restore'; // Используем переданный модуль или по умолчанию photo_restore
+    // Проверяем, что moduleName является строкой, и исправляем если это объект
+    let module = moduleName;
+    if (typeof moduleName !== 'string') {
+      console.log('⚠️ [RESTORE] moduleName не является строкой:', moduleName, typeof moduleName);
+      module = 'photo_restore'; // Используем по умолчанию
+    } else {
+      module = moduleName;
+    }
+    console.log('📁 [RESTORE] Используем модуль:', module);
     
     // Используем FileManagerService для перемещения файла
     const finalPath = FileManagerService.moveFileToUserDirectory(
@@ -312,6 +319,52 @@ app.get('/api/photos/history/:userId', async (req, res) => {
     res.json(history);
   } catch (error) {
     console.error('Ошибка при получении истории фото:', error);
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+  }
+});
+
+/**
+ * Получить историю реставраций пользователя
+ * GET /api/photos/history/:userId/restore
+ */
+app.get('/api/photos/history/:userId/restore', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { page = 1, limit = 10 } = req.query;
+    
+    const history = await PhotoRestorationService.getUserPhotoHistoryByModule(
+      parseInt(userId),
+      'photo_restore',
+      parseInt(page as string),
+      parseInt(limit as string)
+    );
+    
+    res.json(history);
+  } catch (error) {
+    console.error('Ошибка при получении истории реставраций:', error);
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+  }
+});
+
+/**
+ * Получить историю стилизаций пользователя
+ * GET /api/photos/history/:userId/stylize
+ */
+app.get('/api/photos/history/:userId/stylize', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { page = 1, limit = 10 } = req.query;
+    
+    const history = await PhotoRestorationService.getUserPhotoHistoryByModule(
+      parseInt(userId),
+      'photo_stylize',
+      parseInt(page as string),
+      parseInt(limit as string)
+    );
+    
+    res.json(history);
+  } catch (error) {
+    console.error('Ошибка при получении истории стилизаций:', error);
     res.status(500).json({ error: 'Внутренняя ошибка сервера' });
   }
 });
