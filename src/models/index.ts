@@ -70,7 +70,7 @@ interface ApiRequestAttributes {
   user_id: number;
   photo_id?: number;
   api_name: string;
-  request_type: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit' | 'photo_stylize';
+  request_type: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit' | 'photo_stylize' | 'era_style';
   request_data?: string;
   response_data?: string;
   prompt?: string;
@@ -87,7 +87,7 @@ interface ApiRequestCreationAttributes extends Optional<ApiRequestAttributes, 'i
 interface ServicePriceAttributes {
   id: number;
   service_name: string;
-  service_type: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit' | 'photo_stylize';
+  service_type: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit' | 'photo_stylize' | 'era_style';
   price: number;
   currency: string;
   is_active: boolean;

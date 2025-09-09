@@ -5,6 +5,7 @@ import path from 'path';
 import { validate, parse } from '@telegram-apps/init-data-node';
 import { PhotoRestorationService } from './services/PhotoRestorationService';
 import { PhotoStylizationService } from './services/PhotoStylizationService';
+import { EraStyleService } from './services/EraStyleService';
 import { FileManagerService } from './services/FileManagerService';
 import { ImageGenerationService } from './services/ImageGenerationService';
 import { BalanceService } from './services/BalanceService';
@@ -370,6 +371,29 @@ app.get('/api/photos/history/:userId/stylize', async (req, res) => {
 });
 
 /**
+ * Получить историю изменения стиля эпохи пользователя
+ * GET /api/photos/history/:userId/era-style
+ */
+app.get('/api/photos/history/:userId/era-style', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { page = 1, limit = 10 } = req.query;
+    
+    const history = await PhotoRestorationService.getUserPhotoHistoryByModule(
+      parseInt(userId),
+      'era_style',
+      parseInt(page as string),
+      parseInt(limit as string)
+    );
+    
+    res.json(history);
+  } catch (error) {
+    console.error('Ошибка при получении истории изменения стиля эпохи:', error);
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+  }
+});
+
+/**
  * Получить стоимость стилизации фото
  */
 app.get('/api/photos/stylization-cost', async (req, res) => {
@@ -520,6 +544,179 @@ app.post('/api/photos/stylize', upload.single('photo'), async (req: MulterReques
     res.json(result);
   } catch (error) {
     console.error('❌ [STYLIZE] Ошибка при стилизации фото:', error);
+    
+    // Удаляем временный файл в случае ошибки
+    if (req.file && req.file.path) {
+      try {
+        const fs = require('fs');
+        if (fs.existsSync(req.file.path)) {
+          fs.unlinkSync(req.file.path);
+          console.log('🗑️ Удален временный файл:', req.file.path);
+        }
+      } catch (unlinkError) {
+        console.error('❌ Ошибка при удалении временного файла:', unlinkError);
+      }
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: 'Произошла техническая ошибка. Попробуйте позже'
+    });
+  }
+});
+
+/**
+ * Получить доступные эпохи для изменения стиля
+ */
+app.get('/api/photos/eras', async (req, res) => {
+  try {
+    const eras = EraStyleService.getAvailableEras();
+    res.json({
+      success: true,
+      eras
+    });
+  } catch (error) {
+    console.error('Ошибка при получении эпох:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Внутренняя ошибка сервера'
+    });
+  }
+});
+
+/**
+ * Получить стоимость изменения стиля эпохи
+ */
+app.get('/api/photos/era-style-cost', async (req, res) => {
+  try {
+    const cost = await EraStyleService.getEraStyleCost();
+    res.json({
+      success: true,
+      cost: cost,
+      currency: 'RUB'
+    });
+  } catch (error) {
+    console.error('Ошибка при получении стоимости изменения стиля эпохи:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Внутренняя ошибка сервера'
+    });
+  }
+});
+
+/**
+ * Изменение стиля эпохи
+ */
+app.post('/api/photos/era-style', upload.single('photo'), async (req: MulterRequest, res: Response) => {
+  try {
+    const { userId, telegramId, prompt, eraId, operationType } = req.body;
+    
+    console.log('🏛️ [ERA_STYLE] Начинаем процесс изменения стиля эпохи');
+    console.log('🏛️ [ERA_STYLE] userId (database):', userId);
+    console.log('🏛️ [ERA_STYLE] telegramId:', telegramId);
+    console.log('🏛️ [ERA_STYLE] eraId:', eraId);
+    console.log('🏛️ [ERA_STYLE] operationType:', operationType);
+    console.log('🏛️ [ERA_STYLE] prompt длина:', prompt?.length || 0);
+    console.log('🏛️ [ERA_STYLE] file:', req.file ? req.file.filename : 'отсутствует');
+    
+    // Валидация входных данных
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: 'Файл не был загружен'
+      });
+    }
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'userId обязателен'
+      });
+    }
+
+    if (!telegramId) {
+      return res.status(400).json({
+        success: false,
+        error: 'telegramId обязателен'
+      });
+    }
+
+    if (!eraId) {
+      return res.status(400).json({
+        success: false,
+        error: 'eraId обязателен'
+      });
+    }
+
+    if (operationType !== 'era_style') {
+      return res.status(400).json({
+        success: false,
+        error: 'operationType должен быть era_style'
+      });
+    }
+
+    // Валидация размера файла (уже проверяется multer, но добавим дополнительную проверку)
+    if (req.file.size > 10 * 1024 * 1024) {
+      return res.status(400).json({
+        success: false,
+        error: 'Размер файла не должен превышать 10MB'
+      });
+    }
+
+    // Валидация типа файла
+    if (!req.file.mimetype.startsWith('image/')) {
+      return res.status(400).json({
+        success: false,
+        error: 'Поддерживаются только изображения'
+      });
+    }
+
+    // Перемещаем файл из временной папки в структуру папок пользователя
+    const moduleName = 'era-style';
+    const finalPath = FileManagerService.moveFileToUserDirectory(
+      req.file.path,
+      parseInt(telegramId),
+      moduleName,
+      req.file.filename
+    );
+    
+    // Формируем URL к файлу
+    const imageFullUrl = FileManagerService.createFileUrl(
+      parseInt(telegramId),
+      moduleName,
+      req.file.filename
+    );
+    
+    console.log('🏛️ [ERA_STYLE] finalPath:', finalPath);
+    console.log('🏛️ [ERA_STYLE] imageFullUrl:', imageFullUrl);
+
+    // Определяем промпт: если передан custom prompt, используем его, иначе берем из предустановленной эпохи
+    let finalPrompt = prompt;
+    if (!prompt || prompt.trim().length === 0) {
+      finalPrompt = EraStyleService.getEraPrompt(eraId);
+      if (!finalPrompt) {
+        return res.status(400).json({
+          success: false,
+          error: 'Неверная эпоха или промпт не найден'
+        });
+      }
+    }
+
+    console.log('🏛️ [ERA_STYLE] finalPrompt:', finalPrompt?.substring(0, 150) + '...');
+
+    const result = await EraStyleService.stylePhotoByEra({
+      userId: parseInt(userId),
+      telegramId: parseInt(telegramId),
+      imageUrl: finalPath,
+      eraId: eraId,
+      prompt: finalPrompt,
+      originalFilename: req.file.originalname
+    });
+    
+    console.log('🏛️ [ERA_STYLE] Результат изменения стиля эпохи:', result);
+    res.json(result);
+  } catch (error) {
+    console.error('❌ [ERA_STYLE] Ошибка при изменении стиля эпохи:', error);
     
     // Удаляем временный файл в случае ошибки
     if (req.file && req.file.path) {

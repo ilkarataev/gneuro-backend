@@ -405,11 +405,11 @@ export class PhotoRestorationService {
   }
 
   /**
-   * Получить историю фото пользователя по типу модуля (restore/stylize)
+   * Получить историю фото пользователя по типу модуля (restore/stylize/era_style)
    */
   static async getUserPhotoHistoryByModule(
     userId: number, 
-    moduleType: 'photo_restore' | 'photo_stylize',
+    moduleType: 'photo_restore' | 'photo_stylize' | 'era_style',
     page: number = 1, 
     limit: number = 10
   ): Promise<{

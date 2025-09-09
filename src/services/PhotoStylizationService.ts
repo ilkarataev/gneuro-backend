@@ -35,13 +35,32 @@ export class PhotoStylizationService {
     'glamour': 'Transform the uploaded photo into a glamorous fashion magazine cover: professional studio lighting with soft highlights, elegant pose like a high-fashion model, luxurious background with soft bokeh, flawless skin retouching, vibrant colors with magazine-style color grading, timeless style like fashion magazine cover.',
     'autumn': 'Convert the uploaded photo into an autumn forest photoshoot: person standing among golden and red fall leaves, misty atmosphere, warm sunlight filtering through trees, natural pose with wind-swept hair, realistic outdoor scene, vibrant seasonal colors, high resolution.',
     'cinema': 'Style the uploaded image as a cinematic movie still: dramatic lighting with lens flare, wide-angle composition like a Hollywood film scene, intense expression, subtle depth of field blur on background, noir or epic vibe, preserve original subject\'s features, 35mm film grain.',
-    'poet': 'Modify the uploaded photo to include a famous poet (like Pushkin or Byron) beside the subject: intimate literary setting in a cozy library or garden, soft natural light, thoughtful poses as if in conversation, realistic historical attire for the poet, warm and inspirational atmosphere, high detail on faces and books.'
+    'poet': 'Modify the uploaded photo to include a famous poet (like Pushkin or Byron) beside the subject: intimate literary setting in a cozy library or garden, soft natural light, thoughtful poses as if in conversation, realistic historical attire for the poet, warm and inspirational atmosphere, high detail on faces and books.',
+    // Эпохи для изменения стиля
+    'russia_early_20': 'Redesign the uploaded image in the style of early 20th-century Russia: Art Nouveau influences, ornate wooden furniture, samovar on table, lace curtains, soft gas lamp lighting, imperial colors like deep red and gold, realistic historical accuracy, preserve original layout and main elements.',
+    'russia_19': 'Transform the uploaded photo to 19th-century Russian style: neoclassical architecture for rooms, elaborate ball gowns or military uniforms, candlelit ambiance, heavy velvet drapes, earthy tones with accents of emerald, detailed textures like brocade, keep the core subject intact in a romantic era setting.',
+    'soviet': 'Edit the uploaded image into Soviet Union era style (1950s-1980s): functional communist design, wooden bookshelves with propaganda posters, simple upholstered furniture, warm bulb lighting, muted colors like beige and gray with red accents, realistic socialist realism vibe, maintain original composition.',
+    'nineties': 'Style the uploaded photo as 1990s aesthetic: grunge or minimalist vibe, bulky furniture like IKEA-inspired, neon posters or MTV influences, baggy clothes with plaid patterns, fluorescent lighting, vibrant yet faded colors like acid wash denim, high detail on retro textures, preserve the subject\'s pose and key features.'
   };
 
   /**
    * Получить текущую стоимость стилизации
    */
   static async getStylizationCost(): Promise<number> {
+    return await PriceService.getServicePrice('photo_stylize');
+  }
+
+  /**
+   * Получить стоимость стилизации для конкретного стиля
+   */
+  static async getStylizationCostByStyle(styleId: string): Promise<number> {
+    // Для эпох используем повышенную стоимость
+    const eraStyles = ['russia_early_20', 'russia_19', 'soviet', 'nineties'];
+    
+    if (eraStyles.includes(styleId)) {
+      return await PriceService.getServicePrice('era_style');
+    }
+    
     return await PriceService.getServicePrice('photo_stylize');
   }
 
@@ -79,8 +98,8 @@ export class PhotoStylizationService {
         };
       }
 
-      // Получаем актуальную стоимость стилизации из БД
-      const stylizationCost = await this.getStylizationCost();
+      // Получаем актуальную стоимость стилизации из БД (зависит от стиля)
+      const stylizationCost = await this.getStylizationCostByStyle(request.styleId);
       console.log('💰 [STYLIZE] Стоимость стилизации:', stylizationCost);
 
       // Проверяем баланс пользователя
@@ -96,11 +115,16 @@ export class PhotoStylizationService {
         };
       }
 
+      // Определяем тип запроса в зависимости от стиля
+      const eraStyles = ['russia_early_20', 'russia_19', 'soviet', 'nineties'];
+      const requestType = eraStyles.includes(request.styleId) ? 'era_style' : 'photo_stylize';
+      const apiName = eraStyles.includes(request.styleId) ? 'gemini_era_style' : 'gemini_stylize';
+      
       // Создаем запрос в базе данных
       const apiRequest = await ApiRequest.create({
         user_id: request.userId,
-        api_name: 'gemini_stylize',
-        request_type: 'photo_stylize',
+        api_name: apiName,
+        request_type: requestType,
         prompt: request.prompt,
         cost: stylizationCost,
         status: 'processing',
@@ -108,7 +132,8 @@ export class PhotoStylizationService {
           styleId: request.styleId,
           originalFilename: request.originalFilename,
           imageUrl: request.imageUrl,
-          operation: 'photo_stylize'
+          operation: requestType,
+          ...(eraStyles.includes(request.styleId) && { eraId: request.styleId })
         })
       });
 
@@ -312,6 +337,27 @@ export class PhotoStylizationService {
         id: 'poet',
         name: 'Фото с поэтом',
         description: 'Литературная обстановка с известным поэтом'
+      },
+      // Исторические эпохи
+      {
+        id: 'russia_early_20',
+        name: 'Россия начала 20-го века',
+        description: 'Стиль модерна и Серебряного века'
+      },
+      {
+        id: 'russia_19',
+        name: 'Россия 19 век',
+        description: 'Эпоха классицизма и романтизма'
+      },
+      {
+        id: 'soviet',
+        name: 'Советский Союз',
+        description: 'Функциональный стиль СССР 1950-1980'
+      },
+      {
+        id: 'nineties',
+        name: '90-е',
+        description: 'Эстетика девяностых и постсоветское время'
       }
     ];
   }
