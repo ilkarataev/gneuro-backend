@@ -70,7 +70,7 @@ interface ApiRequestAttributes {
   user_id: number;
   photo_id?: number;
   api_name: string;
-  request_type: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit';
+  request_type: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit' | 'photo_stylize';
   request_data?: string;
   response_data?: string;
   prompt?: string;
@@ -87,7 +87,7 @@ interface ApiRequestCreationAttributes extends Optional<ApiRequestAttributes, 'i
 interface ServicePriceAttributes {
   id: number;
   service_name: string;
-  service_type: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit';
+  service_type: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit' | 'photo_stylize';
   price: number;
   currency: string;
   is_active: boolean;
@@ -154,7 +154,7 @@ class ApiRequest extends Model<ApiRequestAttributes, ApiRequestCreationAttribute
   public user_id!: number;
   public photo_id?: number;
   public api_name!: string;
-  public request_type!: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit';
+  public request_type!: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit' | 'photo_stylize';
   public request_data?: string;
   public response_data?: string;
   public prompt?: string;
@@ -172,7 +172,7 @@ class ApiRequest extends Model<ApiRequestAttributes, ApiRequestCreationAttribute
 class ServicePrice extends Model<ServicePriceAttributes, ServicePriceCreationAttributes> implements ServicePriceAttributes {
   public id!: number;
   public service_name!: string;
-  public service_type!: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit';
+  public service_type!: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit' | 'photo_stylize';
   public price!: number;
   public currency!: string;
   public is_active!: boolean;
@@ -375,7 +375,7 @@ ApiRequest.init({
     allowNull: false
   },
   request_type: {
-    type: DataTypes.ENUM('photo_restore', 'image_generate', 'music_generate', 'video_edit'),
+    type: DataTypes.ENUM('photo_restore', 'image_generate', 'music_generate', 'video_edit', 'photo_stylize'),
     allowNull: false
   },
   request_data: {
@@ -431,7 +431,7 @@ ServicePrice.init({
     allowNull: false,
   },
   service_type: {
-    type: DataTypes.ENUM('photo_restore', 'image_generate', 'music_generate', 'video_edit'),
+    type: DataTypes.ENUM('photo_restore', 'image_generate', 'music_generate', 'video_edit', 'photo_stylize'),
     allowNull: false
   },
   price: {

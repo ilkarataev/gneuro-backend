@@ -6,10 +6,12 @@ import { GoogleGenAI } from '@google/genai';
 import { Photo, ApiRequest, User } from '../models/index';
 import { BalanceService } from './BalanceService';
 import { PriceService } from './PriceService';
+import { FileManagerService } from './FileManagerService';
 
 export interface RestorePhotoRequest {
   userId: number;
   telegramId?: number; // Добавляем telegramId
+  moduleName?: string; // Добавляем имя модуля для организации папок
   imageUrl: string;
   options?: {
     enhance_face?: boolean;
@@ -75,7 +77,7 @@ export class PhotoRestorationService {
 
       try {
         // Отправляем запрос к Gemini API
-        const response = await this.callGeminiAPI(request.imageUrl, request.options, request.userId, request.telegramId);
+        const response = await this.callGeminiAPI(request.imageUrl, request.options, request.userId, request.telegramId, request.moduleName);
         
         if (response.success && response.restoredUrl) {
           // Обновляем запись фото
@@ -182,7 +184,7 @@ export class PhotoRestorationService {
   /**
    * Вызов Gemini API для реставрации фото
    */
-  private static async callGeminiAPI(imageUrl: string, options?: any, userId?: number, telegramId?: number): Promise<{ success: boolean; restoredUrl?: string; error?: string }> {
+  private static async callGeminiAPI(imageUrl: string, options?: any, userId?: number, telegramId?: number, moduleName?: string): Promise<{ success: boolean; restoredUrl?: string; error?: string }> {
     try {
       // Получаем изображение и конвертируем в base64
       const imageBase64 = await this.getImageAsBase64(imageUrl);
@@ -244,11 +246,12 @@ export class PhotoRestorationService {
           } else if (part.inlineData && part.inlineData.data) {
             console.log('✅ [GEMINI] Найдено изображение, MIME:', part.inlineData.mimeType);
             
-            // Сохраняем восстановленное изображение
+            // Сохраняем восстановленное изображение с поддержкой модуля
             const restoredImagePath = await this.saveBase64Image(
               part.inlineData.data, 
               part.inlineData.mimeType || 'image/jpeg', 
-              telegramId
+              telegramId,
+              moduleName
             );
             
             return {
@@ -314,29 +317,38 @@ export class PhotoRestorationService {
   /**
    * Сохранение base64 изображения как файл
    */
-  private static async saveBase64Image(base64Data: string, mimeType: string, telegramId?: number): Promise<string> {
-    const extension = mimeType.includes('png') ? 'png' : 'jpg';
-    const filename = `restored_${Date.now()}.${extension}`;
+  private static async saveBase64Image(base64Data: string, mimeType: string, telegramId?: number, moduleName?: string): Promise<string> {
+    // Используем переданный модуль или по умолчанию photo_restore
+    const module = moduleName || 'photo_restore';
     
-    // Создаем структуру папок для восстановленных изображений (используем telegramId)
-    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-    const userDir = telegramId ? `uploads/${telegramId}/${today}/restored/` : 'uploads/restored/';
-    
-    // Создаем папку, если она не существует
-    if (!fs.existsSync(userDir)) {
-      fs.mkdirSync(userDir, { recursive: true });
-      console.log('📁 Создана папка для восстановленных изображений:', userDir);
+    if (!telegramId) {
+      // Fallback для случаев без telegramId (не рекомендуется для новых модулей)
+      const extension = mimeType.includes('png') ? 'png' : 'jpg';
+      const filename = `restored_${Date.now()}.${extension}`;
+      const fallbackDir = `uploads/${module}/restored/`;
+      
+      if (!fs.existsSync(fallbackDir)) {
+        fs.mkdirSync(fallbackDir, { recursive: true });
+      }
+      
+      const filePath = path.join(process.cwd(), fallbackDir, filename);
+      const buffer = Buffer.from(base64Data, 'base64');
+      fs.writeFileSync(filePath, buffer);
+      
+      const baseUrl = process.env.BASE_URL || 'https://suno.ilkarvet.ru';
+      return `${baseUrl}/uploads/${module}/restored/${filename}`;
     }
     
-    const filePath = path.join(process.cwd(), userDir, filename);
+    // Используем новый FileManagerService для организованного хранения
+    const savedFile = FileManagerService.saveBase64File(
+      base64Data,
+      mimeType,
+      telegramId,
+      module,
+      'restored'
+    );
     
-    const buffer = Buffer.from(base64Data, 'base64');
-    fs.writeFileSync(filePath, buffer);
-    
-    // Возвращаем URL через /api/uploads/ для доступа через nginx
-    const baseUrl = process.env.BASE_URL || 'https://suno.ilkarvet.ru';
-    const relativePath = telegramId ? `${telegramId}/${today}/restored/${filename}` : `restored/${filename}`;
-    return `${baseUrl}/uploads/${relativePath}`;
+    return savedFile.url;
   }
 
   /**
