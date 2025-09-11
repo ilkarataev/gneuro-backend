@@ -70,10 +70,6 @@ jobs:
           echo "🧩 Starting docker-compose..."
           ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes ${USER}@${REMOTE} "cd ${DESTINATION_PATH} && docker compose -f ${DOCKER_COMPOSE_FILE} up -d --build"
 
-          # Права на путь деплоя (по желанию)
-          echo "🔐 Setting permissions..."
-          ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes ${USER}@${REMOTE} "sudo chmod 755 /home /home/${USER} /home/${USER}/${AREA}_${BASE_NAME}"
-
           echo "✅ Development deployment completed successfully!"
 
       - name: Get commit info
