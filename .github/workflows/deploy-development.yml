@@ -43,7 +43,7 @@ jobs:
           echo "📍 Destination: ${USER}@${REMOTE}:${DESTINATION_PATH}"
 
           # Создаём папку назначения
-          ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes ${USER}@${REMOTE} "mkdir -p ${DESTINATION_PATH}"
+          ssh -o StrictHostKeyChecking=no ${USER}@${REMOTE} "mkdir -p ${DESTINATION_PATH}"
 
           # Собираем .env
           echo "📄 Creating .env file from secrets..."
@@ -52,8 +52,8 @@ jobs:
           EOF
 
           # Узнаём UID/GID на сервере и добавляем, если их нет
-          REMOTE_UID=$(ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes ${USER}@${REMOTE} "id -u")
-          REMOTE_GID=$(ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes ${USER}@${REMOTE} "id -g")
+          REMOTE_UID=$(ssh -o StrictHostKeyChecking=no ${USER}@${REMOTE} "id -u")
+          REMOTE_GID=$(ssh -o StrictHostKeyChecking=no ${USER}@${REMOTE} "id -g")
           grep -q '^APP_UID=' .env || echo "APP_UID=${REMOTE_UID}" >> .env
           grep -q '^APP_GID=' .env || echo "APP_GID=${REMOTE_GID}" >> .env
 
@@ -68,7 +68,7 @@ jobs:
 
           # Поднимаем compose
           echo "🧩 Starting docker-compose..."
-          ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes ${USER}@${REMOTE} "cd ${DESTINATION_PATH} && docker compose -f ${DOCKER_COMPOSE_FILE} up -d --build"
+          ssh -o StrictHostKeyChecking=no ${USER}@${REMOTE} "cd ${DESTINATION_PATH} && docker compose -f ${DOCKER_COMPOSE_FILE} up -d --build"
 
           echo "✅ Development deployment completed successfully!"
 
