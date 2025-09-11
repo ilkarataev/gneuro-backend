@@ -84,6 +84,7 @@ services:
     environment:
       DATABASE_HOST: mysql
       DATABASE_PORT: 3306
+    user: "${APP_UID}:${APP_GID}"
     env_file:
       - .env
     volumes:
