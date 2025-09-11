@@ -1,0 +1,105 @@
+name: Deploy to Development
+
+on:
+  push:
+    branches:
+      - develop
+  workflow_dispatch:
+
+jobs:
+  deploy-development:
+    runs-on: ubuntu-latest
+    environment: stand
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+
+      - name: Use SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.STAND_SSH_PRIVATE_KEY }}
+
+      - name: Add host to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ vars.STAND_SERVER_HOST }} >> ~/.ssh/known_hosts
+
+
+      - name: Deploy to Development Server
+        run: |
+          echo "🚀 Deploying develop branch to development environment..."
+          
+          # Set variables
+          USER="${{ vars.STAND_SERVER_USER }}"
+          REMOTE="${{ vars.STAND_SERVER_HOST }}"
+          BASE_NAME="backend-gneuro"
+          AREA="development"
+          DESTINATION_PATH="/home/${USER}/${AREA}_${BASE_NAME}/"
+          DOCKER_COMPOSE_FILE="docker-compose-dev.yaml"
+          
+          echo "📍 Destination: ${USER}@${REMOTE}:${DESTINATION_PATH}"
+          
+          # Create destination directory
+          ssh -o StrictHostKeyChecking=no ${USER}@${REMOTE} "mkdir -p ${DESTINATION_PATH}"
+          
+          # Create .env file from secret
+          echo "📄 Creating .env file from secrets..."
+          cat > .env << 'EOF'
+          ${{ secrets.STAND_ENV_FILE }}
+          EOF
+          
+          # Sync .env file
+          echo "📄 Syncing environment file..."
+          rsync -avz -e 'ssh -o StrictHostKeyChecking=no' .env ${USER}@${REMOTE}:${DESTINATION_PATH}/.env
+          
+          # Remove local .env file for security
+          rm -f .env
+          
+          # Sync project files
+          echo "� Syncing project files..."
+          rsync -avz -e 'ssh -o StrictHostKeyChecking=no' docker* src services *.json ${USER}@${REMOTE}:${DESTINATION_PATH}/
+          
+          # Deploy with docker-compose
+          echo "� Starting docker-compose..."
+          ssh -o StrictHostKeyChecking=no ${USER}@${REMOTE} "cd ${DESTINATION_PATH} && docker compose -f ${DOCKER_COMPOSE_FILE} up -d --build"
+          
+          # Set permissions
+          echo "🔐 Setting permissions..."
+          ssh -o StrictHostKeyChecking=no ${USER}@${REMOTE} "sudo chmod 755 /home /home/${USER} /home/${USER}/${AREA}_${BASE_NAME}"
+          
+          echo "✅ Development deployment completed successfully!"
+
+      - name: Get commit info
+        id: commit
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+          echo "message=$(git log -1 --pretty=%B)" >> $GITHUB_OUTPUT
+          echo "author=$(git log -1 --pretty=%an)" >> $GITHUB_OUTPUT
+
+      - name: Deployment Summary
+        run: |
+          echo "## 🚀 Development Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** develop" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ steps.commit.outputs.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Author:** ${{ steps.commit.outputs.author }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Message:** ${{ steps.commit.outputs.message }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment:** Development" >> $GITHUB_STEP_SUMMARY
+          echo "- **Server:** ${{ vars.STAND_SERVER_HOST }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **User:** ${{ vars.STAND_SERVER_USER }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ✅ Successful" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp:** $(date)" >> $GITHUB_STEP_SUMMARY
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "## ❌ Development Deployment Failed" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** develop" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ steps.commit.outputs.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment:** Development" >> $GITHUB_STEP_SUMMARY
+          echo "- **Server:** ${{ vars.STAND_SERVER_HOST }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ❌ Failed" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp:** $(date)" >> $GITHUB_STEP_SUMMARY
