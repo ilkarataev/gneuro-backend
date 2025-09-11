@@ -45,22 +45,22 @@ jobs:
           # Создаём папку назначения
           ssh -o StrictHostKeyChecking=no ${USER}@${REMOTE} "mkdir -p ${DESTINATION_PATH}"
 
-          # Собираем .env
-          echo "📄 Creating .env file from secrets..."
-          cat > .env << 'EOF'
-          ${{ secrets.STAND_ENV_FILE }}
-          EOF
+          # # Собираем .env
+          # echo "📄 Creating .env file from secrets..."
+          # cat > .env << 'EOF'
+          # ${{ secrets.STAND_ENV_FILE }}
+          # EOF
 
-          # Узнаём UID/GID на сервере и добавляем, если их нет
-          REMOTE_UID=$(ssh -o StrictHostKeyChecking=no ${USER}@${REMOTE} "id -u")
-          REMOTE_GID=$(ssh -o StrictHostKeyChecking=no ${USER}@${REMOTE} "id -g")
-          grep -q '^APP_UID=' .env || echo "APP_UID=${REMOTE_UID}" >> .env
-          grep -q '^APP_GID=' .env || echo "APP_GID=${REMOTE_GID}" >> .env
+          # # Узнаём UID/GID на сервере и добавляем, если их нет
+          # REMOTE_UID=$(ssh -o StrictHostKeyChecking=no ${USER}@${REMOTE} "id -u")
+          # REMOTE_GID=$(ssh -o StrictHostKeyChecking=no ${USER}@${REMOTE} "id -g")
+          # grep -q '^APP_UID=' .env || echo "APP_UID=${REMOTE_UID}" >> .env
+          # grep -q '^APP_GID=' .env || echo "APP_GID=${REMOTE_GID}" >> .env
 
-          # Заливаем .env
-          echo "📄 Syncing environment file..."
-          rsync -avz -e 'ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes' .env ${USER}@${REMOTE}:${DESTINATION_PATH}/.env
-          rm -f .env
+          # # Заливаем .env
+          # echo "📄 Syncing environment file..."
+          # rsync -avz -e 'ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes' .env ${USER}@${REMOTE}:${DESTINATION_PATH}/.env
+          # rm -f .env
 
           # Проектные файлы
           echo "📦 Syncing project files..."
