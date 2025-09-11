@@ -395,6 +395,29 @@ app.get('/api/photos/history/:userId/era-style', async (req, res) => {
 });
 
 /**
+ * Получить историю генерации изображений пользователя
+ * GET /api/photos/history/:userId/image-generation
+ */
+app.get('/api/photos/history/:userId/image-generation', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { page = 1, limit = 10 } = req.query;
+    
+    const history = await PhotoRestorationService.getUserPhotoHistoryByModule(
+      parseInt(userId),
+      'image_generate',
+      parseInt(page as string),
+      parseInt(limit as string)
+    );
+    
+    res.json(history);
+  } catch (error) {
+    console.error('Ошибка при получении истории генерации изображений:', error);
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+  }
+});
+
+/**
  * Получить стоимость стилизации фото
  */
 app.get('/api/photos/stylization-cost', async (req, res) => {
@@ -989,6 +1012,176 @@ app.get('/api/balance/leadtech-info/:telegramUserId', async (req, res) => {
   } catch (error) {
     console.error('Ошибка при получении информации о LeadTech:', error);
     res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+  }
+});
+
+/**
+ * Text-to-Image генерация (эндпоинт для фронтенда)
+ */
+app.post('/api/photos/generate', upload.none(), async (req, res) => {
+  try {
+    const { prompt, userId, telegramId, moduleName } = req.body;
+    
+    console.log('🎨 [PHOTOS/GENERATE] Начинаем process text2img генерации');
+    console.log('🎨 [PHOTOS/GENERATE] userId (database):', userId);
+    console.log('🎨 [PHOTOS/GENERATE] telegramId:', telegramId);
+    console.log('🎨 [PHOTOS/GENERATE] moduleName:', moduleName);
+    console.log('🎨 [PHOTOS/GENERATE] prompt:', prompt?.substring(0, 100) + '...');
+    
+    if (!userId || isNaN(parseInt(userId))) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'userId обязателен и должен быть числом',
+        message: 'userId обязателен и должен быть числом'
+      });
+    }
+
+    if (!telegramId || isNaN(parseInt(telegramId))) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'telegramId обязателен и должен быть числом',
+        message: 'telegramId обязателен и должен быть числом'
+      });
+    }
+
+    if (!prompt || prompt.trim().length === 0) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'prompt обязателен',
+        message: 'prompt обязателен'
+      });
+    }
+
+    // Запускаем процесс генерации изображения
+    console.log('🎨 [PHOTOS/GENERATE] Вызываем ImageGenerationService...');
+    const result = await ImageGenerationService.generateImage({
+      userId: parseInt(userId),
+      telegramId: parseInt(telegramId),
+      prompt: prompt.trim(),
+      moduleName: moduleName || 'image_generation',
+      options: {}
+    });
+
+    console.log('🎨 [PHOTOS/GENERATE] Результат генерации:', result);
+    res.json(result);
+  } catch (error) {
+    console.error('❌ [PHOTOS/GENERATE] Ошибка при генерации изображения:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Внутренняя ошибка сервера',
+      message: 'Внутренняя ошибка сервера'
+    });
+  }
+});
+
+/**
+ * Image-to-Image генерация (эндпоинт для фронтенда)
+ */
+app.post('/api/photos/generate-img2img', upload.array('referenceImages', 8), async (req: Request, res: Response) => {
+  try {
+    const { prompt, userId, telegramId, moduleName } = req.body;
+    const referenceImages = req.files as Express.Multer.File[];
+    
+    console.log('🎨 [PHOTOS/GENERATE-IMG2IMG] Начинаем процесс img2img генерации');
+    console.log('🎨 [PHOTOS/GENERATE-IMG2IMG] userId (database):', userId, 'Тип:', typeof userId);
+    console.log('🎨 [PHOTOS/GENERATE-IMG2IMG] telegramId:', telegramId, 'Тип:', typeof telegramId);
+    console.log('🎨 [PHOTOS/GENERATE-IMG2IMG] moduleName:', moduleName);
+    console.log('🎨 [PHOTOS/GENERATE-IMG2IMG] prompt:', prompt?.substring(0, 100) + '...');
+    console.log('🎨 [PHOTOS/GENERATE-IMG2IMG] referenceImages count:', referenceImages?.length || 0);
+    
+    if (!userId || isNaN(parseInt(userId))) {
+      console.error('❌ [PHOTOS/GENERATE-IMG2IMG] Неверный userId:', userId);
+      return res.status(400).json({ 
+        success: false,
+        error: 'userId обязателен и должен быть числом',
+        message: 'userId обязателен и должен быть числом'
+      });
+    }
+
+    if (!telegramId || isNaN(parseInt(telegramId))) {
+      console.error('❌ [PHOTOS/GENERATE-IMG2IMG] Неверный telegramId:', telegramId);
+      return res.status(400).json({ 
+        success: false,
+        error: 'telegramId обязателен и должен быть числом',
+        message: 'telegramId обязателен и должен быть числом'
+      });
+    }
+
+    if (!prompt || prompt.trim().length === 0) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'prompt обязателен',
+        message: 'prompt обязателен'
+      });
+    }
+
+    if (!referenceImages || referenceImages.length === 0) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Необходимо загрузить хотя бы одно референсное изображение',
+        message: 'Необходимо загрузить хотя бы одно референсное изображение'
+      });
+    }
+
+    if (referenceImages.length > 8) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Максимальное количество референсных изображений - 8',
+        message: 'Максимальное количество референсных изображений - 8'
+      });
+    }
+
+    // Запускаем процесс генерации изображения с референсами
+    console.log('🎨 [PHOTOS/GENERATE-IMG2IMG] Вызываем ImageGenerationService...');
+    const result = await ImageGenerationService.generateImageWithReference({
+      userId: parseInt(userId),
+      telegramId: parseInt(telegramId),
+      prompt: prompt.trim(),
+      referenceImages: referenceImages,
+      moduleName: moduleName || 'image_generation_img2img',
+      options: {}
+    });
+
+    console.log('🎨 [PHOTOS/GENERATE-IMG2IMG] Результат генерации:', result);
+    
+    // Очистка временных файлов
+    try {
+      const fs = require('fs');
+      for (const file of referenceImages) {
+        if (fs.existsSync(file.path)) {
+          fs.unlinkSync(file.path);
+          console.log('🗑️ Удален временный файл:', file.path);
+        }
+      }
+    } catch (cleanupError) {
+      console.error('❌ Ошибка при очистке временных файлов:', cleanupError);
+    }
+    
+    res.json(result);
+  } catch (error) {
+    console.error('❌ [PHOTOS/GENERATE-IMG2IMG] Ошибка при генерации изображения:', error);
+    
+    // Очистка временных файлов в случае ошибки
+    const referenceImages = req.files as Express.Multer.File[];
+    if (referenceImages && referenceImages.length > 0) {
+      try {
+        const fs = require('fs');
+        for (const file of referenceImages) {
+          if (fs.existsSync(file.path)) {
+            fs.unlinkSync(file.path);
+            console.log('🗑️ Удален временный файл при ошибке:', file.path);
+          }
+        }
+      } catch (cleanupError) {
+        console.error('❌ Ошибка при очистке временных файлов:', cleanupError);
+      }
+    }
+    
+    res.status(500).json({ 
+      success: false,
+      error: 'Внутренняя ошибка сервера',
+      message: 'Внутренняя ошибка сервера'
+    });
   }
 });
 
