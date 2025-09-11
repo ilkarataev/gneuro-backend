@@ -59,12 +59,12 @@ jobs:
 
           # # Заливаем .env
           # echo "📄 Syncing environment file..."
-          # rsync -avz -e 'ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes' .env ${USER}@${REMOTE}:${DESTINATION_PATH}/.env
+          # rsync -avz -e 'ssh -o StrictHostKeyChecking=no ' .env ${USER}@${REMOTE}:${DESTINATION_PATH}/.env
           # rm -f .env
 
           # Проектные файлы
           echo "📦 Syncing project files..."
-          rsync -avz -e 'ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes' docker* src services *.json ${USER}@${REMOTE}:${DESTINATION_PATH}/
+          rsync -avz -e 'ssh -o StrictHostKeyChecking=no ' docker* src services *.json ${USER}@${REMOTE}:${DESTINATION_PATH}/
 
           # Поднимаем compose
           echo "🧩 Starting docker-compose..."
