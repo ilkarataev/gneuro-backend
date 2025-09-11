@@ -96,8 +96,16 @@ export class FileManagerService {
     const extension = this.getExtensionFromMimeType(mimeType);
     const filename = `${subfolder}_${Date.now()}.${extension}`;
     
-    const processedDir = this.createProcessedDirectory(telegramId, moduleName);
-    const filePath = path.join(processedDir, filename);
+    // Создаем папку с учетом subfolder
+    const dateString = this.getCurrentDateString();
+    const targetDir = path.join(this.BASE_UPLOADS_DIR, telegramId.toString(), moduleName, dateString, subfolder);
+    
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+      console.log('📁 Создана папка для сохранения файла:', targetDir);
+    }
+    
+    const filePath = path.join(targetDir, filename);
     
     const buffer = Buffer.from(base64Data, 'base64');
     fs.writeFileSync(filePath, buffer);

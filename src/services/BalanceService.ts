@@ -30,6 +30,11 @@ export class BalanceService {
    * Получить текущий баланс пользователя по database id
    */
   static async getBalanceById(userId: number): Promise<number> {
+    if (!userId || isNaN(userId)) {
+      console.error('❌ [BalanceService] Неверный userId:', userId);
+      return 0;
+    }
+    
     const user = await User.findByPk(userId);
     return user?.balance || 0;
   }
@@ -38,6 +43,11 @@ export class BalanceService {
    * Получить текущий баланс пользователя по telegram_id с синхронизацией LeadTech
    */
   static async getBalance(telegramUserId: number): Promise<number> {
+    if (!telegramUserId || isNaN(telegramUserId)) {
+      console.error('❌ [BalanceService] Неверный telegramUserId в getBalance:', telegramUserId);
+      return 0;
+    }
+    
     // Сначала синхронизируем с LeadTech
     await this.syncWithLeadTech(telegramUserId);
     
@@ -50,6 +60,11 @@ export class BalanceService {
    * Получить пользователя по telegram_id
    */
   static async getUser(telegramUserId: number): Promise<any> {
+    if (!telegramUserId || isNaN(telegramUserId)) {
+      console.error('❌ [BalanceService] Неверный telegramUserId:', telegramUserId);
+      return null;
+    }
+    
     const user = await User.findOne({ where: { telegram_id: telegramUserId } });
     return user;
   }
@@ -347,6 +362,11 @@ export class BalanceService {
    * Проверить возможность списания суммы по database id
    */
   static async canDebitById(userId: number, amount: number): Promise<boolean> {
+    if (!userId || isNaN(userId)) {
+      console.error('❌ [BalanceService] Неверный userId в canDebitById:', userId);
+      return false;
+    }
+    
     const balance = await this.getBalanceById(userId);
     return balance >= amount;
   }

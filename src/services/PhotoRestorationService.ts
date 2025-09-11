@@ -409,7 +409,7 @@ export class PhotoRestorationService {
    */
   static async getUserPhotoHistoryByModule(
     userId: number, 
-    moduleType: 'photo_restore' | 'photo_stylize' | 'era_style',
+    moduleType: 'photo_restore' | 'photo_stylize' | 'era_style' | 'image_generate',
     page: number = 1, 
     limit: number = 10
   ): Promise<{
@@ -499,11 +499,26 @@ export class PhotoRestorationService {
             return (req as any).photo;
           } else {
             // Создаем временный объект Photo для отображения
+            let original_url = 'unknown';
+            let restored_url = null;
+            
+            // Для разных типов модулей извлекаем URL по-разному
+            if (moduleType === 'image_generate') {
+              // Для генерации изображений нет оригинального изображения
+              original_url = req.request_data ? `prompt: ${JSON.parse(req.request_data).prompt || 'unknown'}` : 'unknown';
+              // Результат генерации сохраняется в imageUrl
+              restored_url = req.response_data ? JSON.parse(req.response_data).imageUrl || null : null;
+            } else {
+              // Для реставрации и стилизации
+              original_url = req.request_data ? JSON.parse(req.request_data).imageUrl || 'unknown' : 'unknown';
+              restored_url = req.response_data ? JSON.parse(req.response_data).styledUrl || null : null;
+            }
+            
             return {
               id: req.id,
               user_id: req.user_id,
-              original_url: req.request_data ? JSON.parse(req.request_data).imageUrl || 'unknown' : 'unknown',
-              restored_url: req.response_data ? JSON.parse(req.response_data).styledUrl || null : null,
+              original_url: original_url,
+              restored_url: restored_url,
               status: req.status,
               createdAt: req.createdAt,
               updatedAt: req.updatedAt,
