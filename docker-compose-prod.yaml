@@ -39,21 +39,21 @@ services:
         limits:
           memory: 512M
 
-  # phpmyadmin:
-  #   platform: linux/amd64
-  #   container_name: api-backend-pma
-  #   image: 'phpmyadmin/phpmyadmin:latest'
-  #   restart: always
-  #   ports: ['${IFACE}:${PHP_ADMIN_PORT}:80']
-  #   environment:
-  #     PMA_HOST: 'mysql'
-  #     PMA_USER: ${DATABASE_USERNAME}
-  #     PMA_PASSWORD: ${DATABASE_PASSWORD}
-  #   networks:
-  #     - payment-network
-  #   depends_on:
-  #     mysql:
-  #       condition: service_healthy
+  phpmyadmin:
+    platform: linux/amd64
+    container_name: api-backend-pma
+    image: 'phpmyadmin/phpmyadmin:latest'
+    restart: always
+    ports: ['127.0.0.1:88:80']
+    environment:
+      PMA_HOST: 'mysql'
+      PMA_USER: ${DATABASE_USERNAME}
+      PMA_PASSWORD: ${DATABASE_PASSWORD}
+    networks:
+      - payment-network
+    depends_on:
+      mysql:
+        condition: service_healthy
 
   migrations:
     container_name: api-backend-migrations
