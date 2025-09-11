@@ -6,10 +6,12 @@ import { GoogleGenAI } from '@google/genai';
 import { Photo, ApiRequest, User } from '../models/index';
 import { BalanceService } from './BalanceService';
 import { PriceService } from './PriceService';
+import { FileManagerService } from './FileManagerService';
 
 export interface RestorePhotoRequest {
   userId: number;
   telegramId?: number; // Добавляем telegramId
+  moduleName?: string; // Добавляем имя модуля для организации папок
   imageUrl: string;
   options?: {
     enhance_face?: boolean;
@@ -63,9 +65,10 @@ export class PhotoRestorationService {
         request_params: JSON.stringify(request.options || {})
       });
 
-      // Записываем API запрос
+      // Записываем API запрос с привязкой к фото
       const apiRequest = await ApiRequest.create({
         user_id: request.userId,
+        photo_id: photo.id, // Добавляем связь с фотографией
         api_name: 'photo_restoration',
         request_type: 'photo_restore',
         request_data: JSON.stringify(request),
@@ -75,7 +78,7 @@ export class PhotoRestorationService {
 
       try {
         // Отправляем запрос к Gemini API
-        const response = await this.callGeminiAPI(request.imageUrl, request.options, request.userId, request.telegramId);
+        const response = await this.callGeminiAPI(request.imageUrl, request.options, request.userId, request.telegramId, request.moduleName);
         
         if (response.success && response.restoredUrl) {
           // Обновляем запись фото
@@ -182,7 +185,7 @@ export class PhotoRestorationService {
   /**
    * Вызов Gemini API для реставрации фото
    */
-  private static async callGeminiAPI(imageUrl: string, options?: any, userId?: number, telegramId?: number): Promise<{ success: boolean; restoredUrl?: string; error?: string }> {
+  private static async callGeminiAPI(imageUrl: string, options?: any, userId?: number, telegramId?: number, moduleName?: string): Promise<{ success: boolean; restoredUrl?: string; error?: string }> {
     try {
       // Получаем изображение и конвертируем в base64
       const imageBase64 = await this.getImageAsBase64(imageUrl);
@@ -244,11 +247,12 @@ export class PhotoRestorationService {
           } else if (part.inlineData && part.inlineData.data) {
             console.log('✅ [GEMINI] Найдено изображение, MIME:', part.inlineData.mimeType);
             
-            // Сохраняем восстановленное изображение
+            // Сохраняем восстановленное изображение с поддержкой модуля
             const restoredImagePath = await this.saveBase64Image(
               part.inlineData.data, 
               part.inlineData.mimeType || 'image/jpeg', 
-              telegramId
+              telegramId,
+              moduleName
             );
             
             return {
@@ -314,29 +318,38 @@ export class PhotoRestorationService {
   /**
    * Сохранение base64 изображения как файл
    */
-  private static async saveBase64Image(base64Data: string, mimeType: string, telegramId?: number): Promise<string> {
-    const extension = mimeType.includes('png') ? 'png' : 'jpg';
-    const filename = `restored_${Date.now()}.${extension}`;
+  private static async saveBase64Image(base64Data: string, mimeType: string, telegramId?: number, moduleName?: string): Promise<string> {
+    // Используем переданный модуль или по умолчанию photo_restore
+    const module = moduleName || 'photo_restore';
     
-    // Создаем структуру папок для восстановленных изображений (используем telegramId)
-    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-    const userDir = telegramId ? `uploads/${telegramId}/${today}/restored/` : 'uploads/restored/';
-    
-    // Создаем папку, если она не существует
-    if (!fs.existsSync(userDir)) {
-      fs.mkdirSync(userDir, { recursive: true });
-      console.log('📁 Создана папка для восстановленных изображений:', userDir);
+    if (!telegramId) {
+      // Fallback для случаев без telegramId (не рекомендуется для новых модулей)
+      const extension = mimeType.includes('png') ? 'png' : 'jpg';
+      const filename = `processed_${Date.now()}.${extension}`;
+      const fallbackDir = `uploads/${module}/processed/`;
+      
+      if (!fs.existsSync(fallbackDir)) {
+        fs.mkdirSync(fallbackDir, { recursive: true });
+      }
+      
+      const filePath = path.join(process.cwd(), fallbackDir, filename);
+      const buffer = Buffer.from(base64Data, 'base64');
+      fs.writeFileSync(filePath, buffer);
+      
+      const baseUrl = process.env.BASE_URL || 'https://suno.ilkarvet.ru';
+      return `${baseUrl}/uploads/${module}/processed/${filename}`;
     }
     
-    const filePath = path.join(process.cwd(), userDir, filename);
+    // Используем новый FileManagerService для организованного хранения
+    const savedFile = FileManagerService.saveBase64File(
+      base64Data,
+      mimeType,
+      telegramId,
+      module,
+      'processed' // Исправлено: используем 'processed' вместо 'restored'
+    );
     
-    const buffer = Buffer.from(base64Data, 'base64');
-    fs.writeFileSync(filePath, buffer);
-    
-    // Возвращаем URL через /api/uploads/ для доступа через nginx
-    const baseUrl = process.env.BASE_URL || 'https://suno.ilkarvet.ru';
-    const relativePath = telegramId ? `${telegramId}/${today}/restored/${filename}` : `restored/${filename}`;
-    return `${baseUrl}/uploads/${relativePath}`;
+    return savedFile.url;
   }
 
   /**
@@ -383,6 +396,138 @@ export class PhotoRestorationService {
       offset
     });
 
+    return {
+      photos: rows,
+      total: count,
+      page,
+      totalPages: Math.ceil(count / limit)
+    };
+  }
+
+  /**
+   * Получить историю фото пользователя по типу модуля (restore/stylize/era_style)
+   */
+  static async getUserPhotoHistoryByModule(
+    userId: number, 
+    moduleType: 'photo_restore' | 'photo_stylize' | 'era_style',
+    page: number = 1, 
+    limit: number = 10
+  ): Promise<{
+    photos: Photo[];
+    total: number;
+    page: number;
+    totalPages: number;
+  }> {
+    const offset = (page - 1) * limit;
+    
+    console.log(`🔍 [DEBUG] Получаем историю для пользователя ${userId}, тип: ${moduleType}, страница: ${page}, лимит: ${limit}`);
+    
+    // Сначала проверим, есть ли вообще записи для пользователя
+    const userPhotos = await Photo.findAll({
+      where: { user_id: userId },
+      limit: 5
+    });
+    console.log(`📸 [DEBUG] Всего фото для пользователя ${userId}:`, userPhotos.length);
+    
+    // Проверим ApiRequest для пользователя
+    const userRequests = await ApiRequest.findAll({
+      where: { user_id: userId },
+      limit: 5
+    });
+    console.log(`📋 [DEBUG] Всего API запросов для пользователя ${userId}:`, userRequests.length);
+    console.log(`📋 [DEBUG] Типы запросов:`, userRequests.map(r => r.request_type));
+    console.log(`📋 [DEBUG] photo_id в запросах:`, userRequests.map(r => ({ id: r.id, photo_id: r.photo_id, type: r.request_type })));
+    
+    // Попробуем другой подход - через ApiRequest
+    const requestsOfType = await ApiRequest.findAll({
+      where: { 
+        user_id: userId,
+        request_type: moduleType 
+      },
+      include: [{
+        model: Photo,
+        as: 'photo',
+        required: false
+      }],
+      limit: 5
+    });
+    console.log(`🔄 [DEBUG] Запросы типа ${moduleType}:`, requestsOfType.length);
+    console.log(`🔄 [DEBUG] С фотографиями:`, requestsOfType.filter(r => (r as any).photo).length);
+    
+    // Получаем фото через ApiRequest с фильтрацией по request_type
+    const { count, rows } = await Photo.findAndCountAll({
+      where: { user_id: userId },
+      include: [{
+        model: ApiRequest,
+        as: 'requests',
+        where: { request_type: moduleType },
+        required: true
+      }],
+      order: [['createdAt', 'DESC']],
+      limit,
+      offset,
+      distinct: true
+    });
+
+    console.log(`✅ [DEBUG] Найдено записей: ${count}, возвращаем: ${rows.length}`);
+    
+    // Альтернативный подход - получаем записи через ApiRequest
+    if (count === 0) {
+      console.log(`🔄 [DEBUG] Пробуем альтернативный поиск через ApiRequest...`);
+      
+      const alternativeRequests = await ApiRequest.findAndCountAll({
+        where: { 
+          user_id: userId,
+          request_type: moduleType 
+        },
+        order: [['createdAt', 'DESC']],
+        limit,
+        offset,
+        include: [{
+          model: Photo,
+          as: 'photo',
+          required: false
+        }]
+      });
+      
+      console.log(`🔄 [DEBUG] Найдено API запросов: ${alternativeRequests.count}`);
+      
+      // Если есть API запросы но нет связанных фотографий, создадим фиктивные записи для отображения
+      if (alternativeRequests.count > 0) {
+        const alternativePhotos = alternativeRequests.rows.map(req => {
+          if ((req as any).photo) {
+            return (req as any).photo;
+          } else {
+            // Создаем временный объект Photo для отображения
+            return {
+              id: req.id,
+              user_id: req.user_id,
+              original_url: req.request_data ? JSON.parse(req.request_data).imageUrl || 'unknown' : 'unknown',
+              restored_url: req.response_data ? JSON.parse(req.response_data).styledUrl || null : null,
+              status: req.status,
+              createdAt: req.createdAt,
+              updatedAt: req.updatedAt,
+              request_params: req.request_data,
+              processing_time: null,
+              error_message: req.error_message,
+              // Дополнительные поля для совместимости
+              original_width: 0,
+              original_height: 0,
+              file_size: 0,
+              mime_type: 'image/jpeg'
+            };
+          }
+        }).filter(Boolean);
+        
+        return {
+          photos: alternativePhotos,
+          total: alternativeRequests.count,
+          page,
+          totalPages: Math.ceil(alternativeRequests.count / limit)
+        };
+      }
+    }
+    
     return {
       photos: rows,
       total: count,

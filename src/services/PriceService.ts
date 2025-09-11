@@ -2,7 +2,7 @@ import { ServicePrice } from '../models/index';
 
 export interface CreatePriceRequest {
   service_name: string;
-  service_type: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit';
+  service_type: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit' | 'photo_stylize' | 'era_style';
   price: number;
   currency?: string;
   description?: string;
@@ -161,7 +161,9 @@ export class PriceService {
       'photo_restore': 10,
       'image_generate': 30,
       'music_generate': 100,
-      'video_edit': 200
+      'video_edit': 200,
+      'photo_stylize': 10,
+      'era_style': 60
     };
 
     return defaultPrices[serviceType] || 50;
@@ -196,6 +198,18 @@ export class PriceService {
           service_type: 'video_edit' as const,
           price: 200,
           description: 'Автоматическое редактирование и обработка видео'
+        },
+        {
+          service_name: 'Стилизация фотографий',
+          service_type: 'photo_stylize' as const,
+          price: 10,
+          description: 'Художественная стилизация фотографий с использованием ИИ'
+        },
+        {
+          service_name: 'Изменение стиля эпохи',
+          service_type: 'era_style' as const,
+          price: 15,
+          description: 'Стилизация изображений под различные исторические эпохи'
         }
       ];
 

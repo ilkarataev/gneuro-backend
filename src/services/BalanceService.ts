@@ -35,9 +35,13 @@ export class BalanceService {
   }
 
   /**
-   * Получить текущий баланс пользователя по telegram_id
+   * Получить текущий баланс пользователя по telegram_id с синхронизацией LeadTech
    */
   static async getBalance(telegramUserId: number): Promise<number> {
+    // Сначала синхронизируем с LeadTech
+    await this.syncWithLeadTech(telegramUserId);
+    
+    // Затем возвращаем актуальный локальный баланс
     const user = await User.findOne({ where: { telegram_id: telegramUserId } });
     return user?.balance || 0;
   }
@@ -291,7 +295,7 @@ export class BalanceService {
   }
 
   /**
-   * Списать с баланса пользователя с интеграцией LeadTech
+   * Списать с баланса пользователя (только локальный баланс)
    */
   static async debitBalance(transaction: BalanceTransaction): Promise<BalanceResult> {
     try {
@@ -300,30 +304,9 @@ export class BalanceService {
         return { success: false, error: 'Пользователь не найден' };
       }
 
-      // Проверяем достаточность средств
+      // Проверяем достаточность средств в локальном балансе
       if (user.balance < transaction.amount) {
         return { success: false, error: 'Недостаточно средств на балансе' };
-      }
-
-      // Если у пользователя есть LeadTech ID, списываем также из LeadTech
-      if (user.leadtech_contact_id) {
-        try {
-          const leadTechAccount = await LeadTechService.getPrimaryAccount(user.leadtech_contact_id);
-          if (leadTechAccount) {
-            const success = await LeadTechService.withdrawFunds({
-              account_id: leadTechAccount.id.toString(),
-              amount: LeadTechService.convertToMinimalUnit(transaction.amount),
-              description: transaction.description
-            });
-
-            if (!success) {
-              return { success: false, error: 'Не удалось списать средства из LeadTech' };
-            }
-          }
-        } catch (error) {
-          console.error('Ошибка при списании из LeadTech:', error);
-          return { success: false, error: 'Ошибка при списании из LeadTech' };
-        }
       }
 
       // Списываем с локального баланса
@@ -341,6 +324,7 @@ export class BalanceService {
         reference_id: transaction.referenceId
       });
 
+      console.log(`💰 [BalanceService] Списано ${transaction.amount} RUB, новый баланс: ${newBalance} RUB`);
       return { success: true, balance: newBalance };
     } catch (error) {
       console.error('Ошибка при списании с баланса:', error);

@@ -41,7 +41,7 @@ deploy() {
 
     rsync -avz -e 'ssh -o StrictHostKeyChecking=no' ${AREA_ENV_FILE} ${DEPLOY_USER}@"$REMOTE:$DESTINATION_PATH/.env"
 
-    rsync -avz -e 'ssh -o StrictHostKeyChecking=no' docker* src services  *.json *.js ${DEPLOY_USER}@"$REMOTE:$DESTINATION_PATH/"
+    rsync -avz -e 'ssh -o StrictHostKeyChecking=no' docker* src services  *.json ${DEPLOY_USER}@"$REMOTE:$DESTINATION_PATH/"
     ssh -o StrictHostKeyChecking=no ${DEPLOY_USER}@$REMOTE "cd $DESTINATION_PATH && docker compose -f ${DOCKER_COMPOSE_FILE} up -d --build"
 }
 

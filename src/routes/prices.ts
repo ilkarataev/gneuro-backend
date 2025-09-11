@@ -31,7 +31,7 @@ router.get('/:serviceType', async (req, res) => {
   try {
     const { serviceType } = req.params;
     
-    if (!['photo_restore', 'image_generate', 'music_generate', 'video_edit'].includes(serviceType)) {
+    if (!['photo_restore', 'image_generate', 'music_generate', 'video_edit', 'photo_stylize'].includes(serviceType)) {
       return res.status(400).json({
         success: false,
         error: 'Неверный тип услуги'
@@ -71,7 +71,7 @@ router.post('/', async (req, res) => {
       });
     }
 
-    if (!['photo_restore', 'image_generate', 'music_generate', 'video_edit'].includes(service_type)) {
+    if (!['photo_restore', 'image_generate', 'music_generate', 'video_edit', 'photo_stylize'].includes(service_type)) {
       return res.status(400).json({
         success: false,
         error: 'Неверный тип услуги'
@@ -122,7 +122,7 @@ router.put('/:serviceType', async (req, res) => {
     const { serviceType } = req.params;
     const { price, is_active, description } = req.body;
 
-    if (!['photo_restore', 'image_generate', 'music_generate', 'video_edit'].includes(serviceType)) {
+    if (!['photo_restore', 'image_generate', 'music_generate', 'video_edit', 'photo_stylize'].includes(serviceType)) {
       return res.status(400).json({
         success: false,
         error: 'Неверный тип услуги'
@@ -170,7 +170,7 @@ router.delete('/:serviceType', async (req, res) => {
   try {
     const { serviceType } = req.params;
 
-    if (!['photo_restore', 'image_generate', 'music_generate', 'video_edit'].includes(serviceType)) {
+    if (!['photo_restore', 'image_generate', 'music_generate', 'video_edit', 'photo_stylize'].includes(serviceType)) {
       return res.status(400).json({
         success: false,
         error: 'Неверный тип услуги'
@@ -207,7 +207,7 @@ router.get('/:serviceType/history', async (req, res) => {
   try {
     const { serviceType } = req.params;
 
-    if (!['photo_restore', 'image_generate', 'music_generate', 'video_edit'].includes(serviceType)) {
+    if (!['photo_restore', 'image_generate', 'music_generate', 'video_edit', 'photo_stylize'].includes(serviceType)) {
       return res.status(400).json({
         success: false,
         error: 'Неверный тип услуги'

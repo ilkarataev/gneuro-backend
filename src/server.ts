@@ -4,7 +4,12 @@ import multer, { MulterError } from 'multer';
 import path from 'path';
 import { validate, parse } from '@telegram-apps/init-data-node';
 import { PhotoRestorationService } from './services/PhotoRestorationService';
+import { PhotoStylizationService } from './services/PhotoStylizationService';
+import { EraStyleService } from './services/EraStyleService';
+import { FileManagerService } from './services/FileManagerService';
+import { ImageGenerationService } from './services/ImageGenerationService';
 import { BalanceService } from './services/BalanceService';
+import { TelegramBotService } from './services/TelegramBotService';
 import pricesRouter from './routes/prices';
 import webhookRouter from './routes/webhook';
 
@@ -204,12 +209,13 @@ app.get('/api/photos/restoration-cost', async (req, res) => {
  */
 app.post('/api/photos/restore', upload.single('photo'), async (req: MulterRequest, res: Response) => {
   try {
-    const { userId, telegramId, options } = req.body;
+    const { userId, telegramId, options, moduleName } = req.body;
     
     console.log('📸 [RESTORE] Начинаем процесс реставрации фото');
     console.log('📸 [RESTORE] userId (database):', userId);
     console.log('📸 [RESTORE] telegramId:', telegramId);
-    console.log('📸 [RESTORE] options:', options);
+    console.log('📸 [RESTORE] moduleName:', moduleName, 'Тип:', typeof moduleName);
+    console.log('📸 [RESTORE] options:', options, 'Тип:', typeof options);
     console.log('📸 [RESTORE] file:', req.file ? req.file.filename : 'отсутствует');
     
     if (!req.file) {
@@ -224,43 +230,42 @@ app.post('/api/photos/restore', upload.single('photo'), async (req: MulterReques
       return res.status(400).json({ error: 'telegramId обязателен' });
     }
 
-    // Перемещаем файл из временной папки в правильную структуру папок
-    // Используем telegramId для создания папки
+    // Используем telegramId и moduleName для создания папки
     const fs = require('fs');
-    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-    const userDir = `uploads/${telegramId}/${today}/`;
-    
-    // Создаем папку пользователя, если не существует
-    if (!fs.existsSync(userDir)) {
-      fs.mkdirSync(userDir, { recursive: true });
-      console.log('📁 Создана папка пользователя:', userDir);
-    }
-    
-    // Перемещаем файл
-    const tempPath = req.file.path;
-    const finalPath = `${userDir}${req.file.filename}`;
-    fs.renameSync(tempPath, finalPath);
-    console.log('📸 [RESTORE] Файл перемещен:', tempPath, '->', finalPath);
-    
-    // Формируем локальный путь и полный URL к файлу
-    const imageLocalPath = `uploads/${telegramId}/${today}/${req.file.filename}`;
-    const baseUrl = process.env.BASE_URL || 'http://localhost:3001/api';
-    // Если BASE_URL содержит /api, заменяем его на /api/uploads, иначе добавляем /uploads
-    let imageFullUrl;
-    if (baseUrl.endsWith('/api')) {
-      imageFullUrl = baseUrl.replace('/api', '') + `/api/uploads/${telegramId}/${today}/${req.file.filename}`;
+    // Проверяем, что moduleName является строкой, и исправляем если это объект
+    let module = moduleName;
+    if (typeof moduleName !== 'string') {
+      console.log('⚠️ [RESTORE] moduleName не является строкой:', moduleName, typeof moduleName);
+      module = 'photo_restore'; // Используем по умолчанию
     } else {
-      imageFullUrl = `${baseUrl}/uploads/${telegramId}/${today}/${req.file.filename}`;
+      module = moduleName;
     }
+    console.log('📁 [RESTORE] Используем модуль:', module);
     
-    console.log('📸 [RESTORE] imageLocalPath:', imageLocalPath);
+    // Используем FileManagerService для перемещения файла
+    const finalPath = FileManagerService.moveFileToUserDirectory(
+      req.file.path,
+      parseInt(telegramId),
+      module,
+      req.file.filename
+    );
+    
+    // Формируем URL к файлу с помощью FileManagerService
+    const imageFullUrl = FileManagerService.createFileUrl(
+      parseInt(telegramId),
+      module,
+      req.file.filename
+    );
+    
+    console.log('📸 [RESTORE] finalPath:', finalPath);
     console.log('📸 [RESTORE] imageFullUrl:', imageFullUrl);
-    
+
     // Запускаем процесс реставрации
     console.log('📸 [RESTORE] Вызываем PhotoRestorationService...');
     const result = await PhotoRestorationService.restorePhoto({
       userId: parseInt(userId), // Используем database userId для записи в БД
       telegramId: parseInt(telegramId), // Добавляем telegramId для создания папок
+      moduleName: module, // Добавляем moduleName для организации папок
       imageUrl: imageFullUrl, // Передаем полный URL вместо локального пути
       options: options ? JSON.parse(options) : {}
     });
@@ -285,9 +290,7 @@ app.post('/api/photos/restore', upload.single('photo'), async (req: MulterReques
     
     res.status(500).json({ error: 'Внутренняя ошибка сервера' });
   }
-});
-
-/**
+});/**
  * Получить статус реставрации фото
  */
 app.get('/api/photos/:photoId/status', async (req, res) => {
@@ -318,6 +321,570 @@ app.get('/api/photos/history/:userId', async (req, res) => {
     res.json(history);
   } catch (error) {
     console.error('Ошибка при получении истории фото:', error);
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+  }
+});
+
+/**
+ * Получить историю реставраций пользователя
+ * GET /api/photos/history/:userId/restore
+ */
+app.get('/api/photos/history/:userId/restore', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { page = 1, limit = 10 } = req.query;
+    
+    const history = await PhotoRestorationService.getUserPhotoHistoryByModule(
+      parseInt(userId),
+      'photo_restore',
+      parseInt(page as string),
+      parseInt(limit as string)
+    );
+    
+    res.json(history);
+  } catch (error) {
+    console.error('Ошибка при получении истории реставраций:', error);
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+  }
+});
+
+/**
+ * Получить историю стилизаций пользователя
+ * GET /api/photos/history/:userId/stylize
+ */
+app.get('/api/photos/history/:userId/stylize', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { page = 1, limit = 10 } = req.query;
+    
+    const history = await PhotoRestorationService.getUserPhotoHistoryByModule(
+      parseInt(userId),
+      'photo_stylize',
+      parseInt(page as string),
+      parseInt(limit as string)
+    );
+    
+    res.json(history);
+  } catch (error) {
+    console.error('Ошибка при получении истории стилизаций:', error);
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+  }
+});
+
+/**
+ * Получить историю изменения стиля эпохи пользователя
+ * GET /api/photos/history/:userId/era-style
+ */
+app.get('/api/photos/history/:userId/era-style', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { page = 1, limit = 10 } = req.query;
+    
+    const history = await PhotoRestorationService.getUserPhotoHistoryByModule(
+      parseInt(userId),
+      'era_style',
+      parseInt(page as string),
+      parseInt(limit as string)
+    );
+    
+    res.json(history);
+  } catch (error) {
+    console.error('Ошибка при получении истории изменения стиля эпохи:', error);
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+  }
+});
+
+/**
+ * Получить стоимость стилизации фото
+ */
+app.get('/api/photos/stylization-cost', async (req, res) => {
+  try {
+    const cost = await PhotoStylizationService.getStylizationCost();
+    res.json({
+      success: true,
+      cost: cost,
+      currency: 'RUB'
+    });
+  } catch (error) {
+    console.error('Ошибка при получении стоимости стилизации:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Внутренняя ошибка сервера'
+    });
+  }
+});
+
+/**
+ * Получить доступные стили для стилизации
+ */
+app.get('/api/photos/styles', async (req, res) => {
+  try {
+    const styles = PhotoStylizationService.getAvailableStyles();
+    res.json({
+      success: true,
+      styles
+    });
+  } catch (error) {
+    console.error('Ошибка при получении стилей:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Внутренняя ошибка сервера'
+    });
+  }
+});
+
+/**
+ * Стилизация фото
+ */
+app.post('/api/photos/stylize', upload.single('photo'), async (req: MulterRequest, res: Response) => {
+  try {
+    const { userId, telegramId, prompt, styleId } = req.body;
+    
+    console.log('🎨 [STYLIZE] Начинаем процесс стилизации фото');
+    console.log('🎨 [STYLIZE] userId (database):', userId);
+    console.log('🎨 [STYLIZE] telegramId:', telegramId);
+    console.log('🎨 [STYLIZE] styleId:', styleId);
+    console.log('🎨 [STYLIZE] prompt длина:', prompt?.length || 0);
+    console.log('🎨 [STYLIZE] file:', req.file ? req.file.filename : 'отсутствует');
+    
+    // Валидация входных данных
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: 'Файл не был загружен'
+      });
+    }
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'userId обязателен'
+      });
+    }
+
+    if (!telegramId) {
+      return res.status(400).json({
+        success: false,
+        error: 'telegramId обязателен'
+      });
+    }
+
+    if (!prompt) {
+      return res.status(400).json({
+        success: false,
+        error: 'prompt обязателен'
+      });
+    }
+
+    if (!styleId) {
+      return res.status(400).json({
+        success: false,
+        error: 'styleId обязателен'
+      });
+    }
+
+    // Валидация размера файла (уже проверяется multer, но добавим дополнительную проверку)
+    if (req.file.size > 10 * 1024 * 1024) {
+      return res.status(400).json({
+        success: false,
+        error: 'Размер файла не должен превышать 10MB'
+      });
+    }
+
+    // Валидация типа файла
+    if (!req.file.mimetype.startsWith('image/')) {
+      return res.status(400).json({
+        success: false,
+        error: 'Поддерживаются только изображения'
+      });
+    }
+
+    // Перемещаем файл из временной папки в структуру папок пользователя
+    const moduleName = 'photo_stylize';
+    const finalPath = FileManagerService.moveFileToUserDirectory(
+      req.file.path,
+      parseInt(telegramId),
+      moduleName,
+      req.file.filename
+    );
+    
+    // Формируем URL к файлу
+    const imageFullUrl = FileManagerService.createFileUrl(
+      parseInt(telegramId),
+      moduleName,
+      req.file.filename
+    );
+    
+    console.log('🎨 [STYLIZE] finalPath:', finalPath);
+    console.log('🎨 [STYLIZE] imageFullUrl:', imageFullUrl);
+
+    // Определяем промпт: если передан custom prompt, используем его, иначе берем из предустановленного стиля
+    let finalPrompt = prompt;
+    if (!prompt || prompt.trim().length === 0) {
+      finalPrompt = PhotoStylizationService.getStylePrompt(styleId);
+      if (!finalPrompt) {
+        return res.status(400).json({
+          success: false,
+          error: 'Неверный стиль или промпт'
+        });
+      }
+    }
+
+    // Запускаем процесс стилизации
+    console.log('🎨 [STYLIZE] Вызываем PhotoStylizationService...');
+    const result = await PhotoStylizationService.stylizePhoto({
+      userId: parseInt(userId),
+      telegramId: parseInt(telegramId),
+      imageUrl: imageFullUrl, // Передаем полный URL для сохранения в request_data
+      localPath: finalPath, // Передаем локальный путь для чтения файла
+      styleId: styleId,
+      prompt: finalPrompt,
+      originalFilename: req.file.originalname
+    });
+
+    console.log('🎨 [STYLIZE] Результат стилизации:', result);
+    res.json(result);
+  } catch (error) {
+    console.error('❌ [STYLIZE] Ошибка при стилизации фото:', error);
+    
+    // Удаляем временный файл в случае ошибки
+    if (req.file && req.file.path) {
+      try {
+        const fs = require('fs');
+        if (fs.existsSync(req.file.path)) {
+          fs.unlinkSync(req.file.path);
+          console.log('🗑️ Удален временный файл:', req.file.path);
+        }
+      } catch (unlinkError) {
+        console.error('❌ Ошибка при удалении временного файла:', unlinkError);
+      }
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: 'Произошла техническая ошибка. Попробуйте позже'
+    });
+  }
+});
+
+/**
+ * Создание подготовленного сообщения для отправки изображения через Mini App
+ */
+app.post('/api/telegram/prepare-photo-message', async (req: Request, res: Response) => {
+  try {
+    const { imageUrl, caption, userId } = req.body;
+
+    console.log('📤 [PREPARE] Создаем подготовленное сообщение');
+    console.log('📤 [PREPARE] imageUrl:', imageUrl);
+    console.log('📤 [PREPARE] caption:', caption);
+    console.log('📤 [PREPARE] userId:', userId);
+
+    // Валидация входных данных
+    if (!imageUrl) {
+      return res.status(400).json({
+        success: false,
+        error: 'imageUrl обязателен'
+      });
+    }
+
+    // Проверяем валидность URL
+    if (!TelegramBotService.isValidImageUrl(imageUrl)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Некорректный URL изображения. URL должен использовать HTTPS протокол'
+      });
+    }
+
+    // Создаем подготовленное сообщение
+    const preparedMessageId = await TelegramBotService.createPreparedPhotoMessage(
+      imageUrl,
+      caption || 'Изображение из нейросети',
+      userId
+    );
+
+    if (preparedMessageId) {
+      console.log('✅ [PREPARE] Подготовленное сообщение создано:', preparedMessageId);
+      
+      res.json({
+        success: true,
+        preparedMessageId,
+        message: 'Подготовленное сообщение создано успешно'
+      });
+    } else {
+      console.error('❌ [PREPARE] Не удалось создать подготовленное сообщение');
+      
+      res.status(500).json({
+        success: false,
+        error: 'Не удалось создать подготовленное сообщение. Попробуйте позже'
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ [PREPARE] Ошибка при создании подготовленного сообщения:', error);
+    
+    res.status(500).json({
+      success: false,
+      error: 'Произошла техническая ошибка при подготовке сообщения'
+    });
+  }
+});
+
+/**
+ * Проверка статуса Telegram бота
+ */
+app.get('/api/telegram/bot-status', async (req: Request, res: Response) => {
+  try {
+    console.log('🤖 [BOT-STATUS] Проверяем статус бота');
+
+    const botInfo = await TelegramBotService.getBotInfo();
+
+    if (botInfo) {
+      res.json({
+        success: true,
+        botInfo,
+        message: 'Бот активен и готов к работе'
+      });
+    } else {
+      res.status(503).json({
+        success: false,
+        error: 'Бот недоступен или неправильно настроен'
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ [BOT-STATUS] Ошибка при проверке статуса бота:', error);
+    
+    res.status(500).json({
+      success: false,
+      error: 'Произошла техническая ошибка при проверке бота'
+    });
+  }
+});
+
+/**
+ * Получить доступные эпохи для изменения стиля
+ */
+app.get('/api/photos/eras', async (req, res) => {
+  try {
+    const eras = EraStyleService.getAvailableEras();
+    res.json({
+      success: true,
+      eras
+    });
+  } catch (error) {
+    console.error('Ошибка при получении эпох:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Внутренняя ошибка сервера'
+    });
+  }
+});
+
+/**
+ * Получить стоимость изменения стиля эпохи
+ */
+app.get('/api/photos/era-style-cost', async (req, res) => {
+  try {
+    const cost = await EraStyleService.getEraStyleCost();
+    res.json({
+      success: true,
+      cost: cost,
+      currency: 'RUB'
+    });
+  } catch (error) {
+    console.error('Ошибка при получении стоимости изменения стиля эпохи:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Внутренняя ошибка сервера'
+    });
+  }
+});
+
+/**
+ * Изменение стиля эпохи
+ */
+app.post('/api/photos/era-style', upload.single('photo'), async (req: MulterRequest, res: Response) => {
+  try {
+    const { userId, telegramId, prompt, eraId, operationType } = req.body;
+    
+    console.log('🏛️ [ERA_STYLE] Начинаем процесс изменения стиля эпохи');
+    console.log('🏛️ [ERA_STYLE] userId (database):', userId);
+    console.log('🏛️ [ERA_STYLE] telegramId:', telegramId);
+    console.log('🏛️ [ERA_STYLE] eraId:', eraId);
+    console.log('🏛️ [ERA_STYLE] operationType:', operationType);
+    console.log('🏛️ [ERA_STYLE] prompt длина:', prompt?.length || 0);
+    console.log('🏛️ [ERA_STYLE] file:', req.file ? req.file.filename : 'отсутствует');
+    
+    // Валидация входных данных
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: 'Файл не был загружен'
+      });
+    }
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'userId обязателен'
+      });
+    }
+
+    if (!telegramId) {
+      return res.status(400).json({
+        success: false,
+        error: 'telegramId обязателен'
+      });
+    }
+
+    if (!eraId) {
+      return res.status(400).json({
+        success: false,
+        error: 'eraId обязателен'
+      });
+    }
+
+    if (operationType !== 'era_style') {
+      return res.status(400).json({
+        success: false,
+        error: 'operationType должен быть era_style'
+      });
+    }
+
+    // Валидация размера файла (уже проверяется multer, но добавим дополнительную проверку)
+    if (req.file.size > 10 * 1024 * 1024) {
+      return res.status(400).json({
+        success: false,
+        error: 'Размер файла не должен превышать 10MB'
+      });
+    }
+
+    // Валидация типа файла
+    if (!req.file.mimetype.startsWith('image/')) {
+      return res.status(400).json({
+        success: false,
+        error: 'Поддерживаются только изображения'
+      });
+    }
+
+    // Перемещаем файл из временной папки в структуру папок пользователя
+    const moduleName = 'era-style';
+    const finalPath = FileManagerService.moveFileToUserDirectory(
+      req.file.path,
+      parseInt(telegramId),
+      moduleName,
+      req.file.filename
+    );
+    
+    // Формируем URL к файлу
+    const imageFullUrl = FileManagerService.createFileUrl(
+      parseInt(telegramId),
+      moduleName,
+      req.file.filename
+    );
+    
+    console.log('🏛️ [ERA_STYLE] finalPath:', finalPath);
+    console.log('🏛️ [ERA_STYLE] imageFullUrl:', imageFullUrl);
+
+    // Определяем промпт: если передан custom prompt, используем его, иначе берем из предустановленной эпохи
+    let finalPrompt = prompt;
+    if (!prompt || prompt.trim().length === 0) {
+      finalPrompt = EraStyleService.getEraPrompt(eraId);
+      if (!finalPrompt) {
+        return res.status(400).json({
+          success: false,
+          error: 'Неверная эпоха или промпт не найден'
+        });
+      }
+    }
+
+    console.log('🏛️ [ERA_STYLE] finalPrompt:', finalPrompt?.substring(0, 150) + '...');
+
+    const result = await EraStyleService.stylePhotoByEra({
+      userId: parseInt(userId),
+      telegramId: parseInt(telegramId),
+      imageUrl: imageFullUrl, // Передаем полный URL для сохранения в request_data
+      eraId: eraId,
+      prompt: finalPrompt,
+      originalFilename: req.file.originalname
+    });
+    
+    console.log('🏛️ [ERA_STYLE] Результат изменения стиля эпохи:', result);
+    res.json(result);
+  } catch (error) {
+    console.error('❌ [ERA_STYLE] Ошибка при изменении стиля эпохи:', error);
+    
+    // Удаляем временный файл в случае ошибки
+    if (req.file && req.file.path) {
+      try {
+        const fs = require('fs');
+        if (fs.existsSync(req.file.path)) {
+          fs.unlinkSync(req.file.path);
+          console.log('🗑️ Удален временный файл:', req.file.path);
+        }
+      } catch (unlinkError) {
+        console.error('❌ Ошибка при удалении временного файла:', unlinkError);
+      }
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: 'Произошла техническая ошибка. Попробуйте позже'
+    });
+  }
+});
+
+/**
+ * Генерация изображения по промпту
+ */
+app.post('/api/images/generate', async (req, res) => {
+  try {
+    const { userId, telegramId, prompt, options } = req.body;
+    
+    console.log('🎨 [IMAGE_GEN] Начинаем процесс генерации изображения');
+    console.log('🎨 [IMAGE_GEN] userId (database):', userId);
+    console.log('🎨 [IMAGE_GEN] telegramId:', telegramId);
+    console.log('🎨 [IMAGE_GEN] prompt:', prompt?.substring(0, 100) + '...');
+    console.log('🎨 [IMAGE_GEN] options:', options);
+    
+    if (!userId) {
+      return res.status(400).json({ error: 'userId обязателен' });
+    }
+
+    if (!telegramId) {
+      return res.status(400).json({ error: 'telegramId обязателен' });
+    }
+
+    if (!prompt || prompt.trim().length === 0) {
+      return res.status(400).json({ error: 'prompt обязателен' });
+    }
+
+    // Запускаем процесс генерации изображения
+    console.log('🎨 [IMAGE_GEN] Вызываем ImageGenerationService...');
+    const result = await ImageGenerationService.generateImage({
+      userId: parseInt(userId),
+      telegramId: parseInt(telegramId),
+      prompt: prompt.trim(),
+      options: options || {}
+    });
+
+    console.log('🎨 [IMAGE_GEN] Результат генерации:', result);
+    res.json(result);
+  } catch (error) {
+    console.error('❌ [IMAGE_GEN] Ошибка при генерации изображения:', error);
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+  }
+});
+
+/**
+ * Получить стоимость генерации изображения
+ */
+app.get('/api/images/generation-cost', async (req, res) => {
+  try {
+    const cost = await ImageGenerationService.getGenerationCost();
+    res.json({ cost });
+  } catch (error) {
+    console.error('Ошибка при получении стоимости генерации изображения:', error);
     res.status(500).json({ error: 'Внутренняя ошибка сервера' });
   }
 });
