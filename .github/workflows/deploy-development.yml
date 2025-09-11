@@ -9,7 +9,6 @@ on:
 jobs:
   deploy-development:
     runs-on: ubuntu-latest
-    environment: stand
     
     steps:
       - name: Checkout code
@@ -79,7 +78,6 @@ jobs:
           echo "message=$(git log -1 --pretty=%B)" >> $GITHUB_OUTPUT
           echo "author=$(git log -1 --pretty=%an)" >> $GITHUB_OUTPUT
 
-      - name: Deployment Summary
         run: |
           echo "## 🚀 Development Deployment Summary" >> $GITHUB_STEP_SUMMARY
           echo "- **Branch:** develop" >> $GITHUB_STEP_SUMMARY
