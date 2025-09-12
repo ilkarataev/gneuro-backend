@@ -30,6 +30,12 @@ export interface StylizePhotoResult {
 
 export class PhotoStylizationService {
   private static readonly GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'test_key';
+  
+  // Настройки для retry механизма
+  private static readonly MAX_RETRY_DURATION = parseInt(process.env.GEMINI_MAX_RETRY_DURATION || '300000'); // 5 минут по умолчанию
+  private static readonly INITIAL_RETRY_DELAY = parseInt(process.env.GEMINI_INITIAL_RETRY_DELAY || '1000'); // 1 секунда по умолчанию
+  private static readonly MAX_RETRY_DELAY = parseInt(process.env.GEMINI_MAX_RETRY_DELAY || '30000'); // 30 секунд по умолчанию
+  private static readonly BACKOFF_MULTIPLIER = parseFloat(process.env.GEMINI_BACKOFF_MULTIPLIER || '2'); // Множитель для экспоненциального роста
 
   /**
    * Получить текущую стоимость стилизации
@@ -172,9 +178,12 @@ export class PhotoStylizationService {
         const stylizedFilename = `stylized_${request.styleId}_${timestamp}${extension}`;
         const stylizedPath = path.join(stylizedDir, stylizedFilename);
 
-        // Отправляем запрос к Gemini API для стилизации
+        // Отправляем запрос к Gemini API для стилизации с retry механизмом
         console.log('🤖 [STYLIZE] Отправляем запрос к Gemini API...');
-        const styledImageBuffer = await this.callGeminiStyleAPI(request.localPath || request.imageUrl, request.prompt);
+        const styledImageBuffer = await this.executeWithRetry(
+          () => this.callGeminiStyleAPI(request.localPath || request.imageUrl, request.prompt),
+          'photo_stylization_api_call'
+        );
         
         // Сохраняем стилизованное изображение
         fs.writeFileSync(stylizedPath, styledImageBuffer);
@@ -312,9 +321,9 @@ export class PhotoStylizationService {
         }
       }
 
-      // Если стилизованное изображение не получено, возвращаем оригинал
-      console.log('⚠️ [GEMINI] Стилизованное изображение не получено, возвращаем оригинал');
-      return imageBuffer;
+      // Если стилизованное изображение не получено, это ошибка API
+      console.log('❌ [GEMINI] Стилизованное изображение не получено от API');
+      throw new Error('API не вернул стилизованное изображение');
 
     } catch (error) {
       console.error('❌ [GEMINI] Ошибка вызова Gemini API:', error);
@@ -389,5 +398,116 @@ export class PhotoStylizationService {
         description: 'Эстетика девяностых и постсоветское время'
       }
     ];
+  }
+
+  /**
+   * Выполнить операцию с retry механизмом
+   */
+  private static async executeWithRetry<T>(
+    operation: () => Promise<T>,
+    operationName: string
+  ): Promise<T> {
+    const startTime = Date.now();
+    let attempt = 0;
+    let lastError: Error | null = null;
+    let totalDelayTime = 0;
+
+    console.log(`🚀 [RETRY] Начинаем ${operationName} с retry механизмом (макс. время: ${this.MAX_RETRY_DURATION}мс)`);
+
+    while (Date.now() - startTime < this.MAX_RETRY_DURATION) {
+      attempt++;
+      const attemptStartTime = Date.now();
+      
+      try {
+        console.log(`🔄 [RETRY] ${operationName} - попытка ${attempt} (время с начала: ${Date.now() - startTime}мс)`);
+        const result = await operation();
+        
+        const attemptDuration = Date.now() - attemptStartTime;
+        if (attempt > 1) {
+          console.log(`✅ [RETRY] ${operationName} - успешно выполнено с попытки ${attempt} за ${attemptDuration}мс (общее время: ${Date.now() - startTime}мс, время задержек: ${totalDelayTime}мс)`);
+        } else {
+          console.log(`✅ [RETRY] ${operationName} - выполнено с первой попытки за ${attemptDuration}мс`);
+        }
+        
+        return result;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        const attemptDuration = Date.now() - attemptStartTime;
+        console.log(`❌ [RETRY] ${operationName} - попытка ${attempt} неудачна за ${attemptDuration}мс:`, lastError.message);
+
+        // Проверяем, стоит ли повторять попытку
+        if (!this.isRetryableError(lastError)) {
+          console.log(`🚫 [RETRY] ${operationName} - ошибка не подлежит повторению, прекращаем попытки`);
+          throw lastError;
+        }
+
+        // Вычисляем задержку для следующей попытки
+        const delay = Math.min(
+          this.INITIAL_RETRY_DELAY * Math.pow(this.BACKOFF_MULTIPLIER, attempt - 1),
+          this.MAX_RETRY_DELAY
+        );
+
+        // Проверяем, остается ли время для следующей попытки
+        const remainingTime = this.MAX_RETRY_DURATION - (Date.now() - startTime);
+        if (delay >= remainingTime) {
+          console.log(`⏰ [RETRY] ${operationName} - время ожидания истекло (осталось ${remainingTime}мс, нужно ${delay}мс)`);
+          break;
+        }
+
+        console.log(`⏳ [RETRY] ${operationName} - ожидание ${delay}мс перед попыткой ${attempt + 1} (осталось времени: ${remainingTime}мс)`);
+        await this.sleep(delay);
+        totalDelayTime += delay;
+      }
+    }
+
+    const totalDuration = Date.now() - startTime;
+    console.log(`💥 [RETRY] ${operationName} - все попытки исчерпаны. Попыток: ${attempt}, общее время: ${totalDuration}мс, время задержек: ${totalDelayTime}мс`);
+    throw lastError || new Error(`Все попытки выполнения ${operationName} исчерпаны за ${totalDuration}мс`);
+  }
+
+  /**
+   * Определить, подлежит ли ошибка повторению
+   */
+  private static isRetryableError(error: Error): boolean {
+    const retryableMessages = [
+      'timeout',
+      'network',
+      'connection',
+      'unavailable',
+      'service unavailable',
+      'internal server error',
+      'bad gateway',
+      'gateway timeout',
+      'temporarily unavailable',
+      'rate limit',
+      'quota exceeded',
+      'fetch failed',
+      'socket hang up',
+      'econnreset',
+      'enotfound',
+      'etimedout',
+      'econnrefused',
+      'server error',
+      '503',
+      '502',
+      '504',
+      '429', // Too Many Requests
+      '500', // Internal Server Error
+      'internal'  // Для ошибок типа "Internal error encountered"
+    ];
+
+    const errorMessage = error.message.toLowerCase();
+    const isRetryable = retryableMessages.some(msg => errorMessage.includes(msg));
+    
+    console.log(`🔍 [RETRY] Анализ ошибки: "${error.message}" - подлежит повторению: ${isRetryable}`);
+    
+    return isRetryable;
+  }
+
+  /**
+   * Пауза на указанное количество миллисекунд
+   */
+  private static sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }

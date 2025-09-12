@@ -69,11 +69,41 @@ Retry выполняется для следующих типов ошибок:
 ## Пример использования
 
 ```typescript
-// Механизм автоматически активируется для всех вызовов генерации изображений
+// Механизм автоматически активируется для всех вызовов к Gemini API в следующих сервисах:
+
+// Генерация изображений
 const result = await ImageGenerationService.generateImage({
   userId: 123,
   telegramId: 456,
   prompt: "Красивый закат над морем"
+});
+
+// Реставрация фотографий
+const restorationResult = await PhotoRestorationService.restorePhoto({
+  userId: 123,
+  telegramId: 456,
+  imageUrl: "path/to/image.jpg",
+  options: { enhance_face: true }
+});
+
+// Стилизация фотографий
+const stylizationResult = await PhotoStylizationService.stylizePhoto({
+  userId: 123,
+  telegramId: 456,
+  imageUrl: "path/to/image.jpg",
+  styleId: "glamour",
+  prompt: "Стиль гламура",
+  originalFilename: "photo.jpg"
+});
+
+// Стилизация в стиле эпохи
+const eraStyleResult = await EraStyleService.stylePhotoByEra({
+  userId: 123,
+  telegramId: 456,
+  imageUrl: "path/to/image.jpg",
+  eraId: "russia_19",
+  prompt: "Стиль 19 века",
+  originalFilename: "photo.jpg"
 });
 
 // Retry сработает автоматически при временных сбоях API
