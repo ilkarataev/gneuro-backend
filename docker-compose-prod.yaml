@@ -18,7 +18,6 @@ services:
     volumes:
       - './docker/mysql/conf.d:/etc/mysql/conf.d'
       - 'mysql_data:/var/lib/mysql'
-    # ports: ['${IFACE}:${MYSQL_PORT_OUT}:3306']
     env_file:
       - .env
     environment:

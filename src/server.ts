@@ -123,6 +123,32 @@ app.get('/api/users/:userId/jobs', async (req, res) => {
   }
 });
 
+/**
+ * Получить статус конкретной задачи
+ */
+app.get('/api/jobs/:jobId/status', async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const result = await QueueService.getJobStatus(parseInt(jobId));
+    
+    if (!result) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Задача не найдена' 
+      });
+    }
+    
+    res.json({ 
+      success: true, 
+      job: result 
+    });
+  } catch (error) {
+    console.error('❌ Ошибка при получении статуса задачи:', error);
+    const errorResponse = ErrorHandlingService.handleError(error instanceof Error ? error : new Error('Неизвестная ошибка'));
+    res.status(500).json(errorResponse);
+  }
+});
+
 // Подключаем роуты
 app.use('/api/prices', pricesRouter);
 app.use('/api/webhook', webhookRouter);
