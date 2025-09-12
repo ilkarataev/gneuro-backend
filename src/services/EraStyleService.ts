@@ -48,8 +48,8 @@ export class EraStyleService {
    */
   static async getEraPrompt(eraId: string): Promise<string> {
     try {
-      // Формируем ключ промпта
-      const promptKey = `era_style_${eraId}`;
+      // Если eraId уже содержит префикс era_style_, используем его как есть
+      const promptKey = eraId.startsWith('era_style_') ? eraId : `era_style_${eraId}`;
       
       // Получаем промпт из базы
       const prompt = await PromptService.getPrompt(promptKey);
@@ -57,11 +57,16 @@ export class EraStyleService {
     } catch (error) {
       console.error(`❌ [ERA_STYLE] Ошибка получения промпта для эпохи "${eraId}":`, error);
       
-      // Резервные промпты на случай проблем с базой
+      // Резервные промпты на случай проблем с базой (поддерживаем оба формата ID)
       const fallbackPrompts: Record<string, string> = {
+        'era_style_russia_early_20th': 'Redesign the uploaded image in the style of early 20th-century Russia: Art Nouveau influences, ornate wooden furniture, samovar on table, lace curtains, soft gas lamp lighting, imperial colors like deep red and gold, realistic historical accuracy, preserve original layout and main elements.',
+        'era_style_russia_19th': 'Transform the uploaded photo to 19th-century Russian style: neoclassical architecture for rooms, elaborate ball gowns or military uniforms, candlelit ambiance, heavy velvet drapes, earthy tones with accents of emerald, detailed textures like brocade, keep the core subject intact in a romantic era setting.',
+        'era_style_soviet_union': 'Edit the uploaded image into Soviet Union era style (1950s-1980s): functional communist design, wooden bookshelves with propaganda posters, simple upholstered furniture, warm bulb lighting, muted colors like beige and gray with red accents, realistic socialist realism vibe, maintain original composition.',
+        'era_style_90s': 'Style the uploaded photo as 1990s aesthetic: grunge or minimalist vibe, bulky furniture like IKEA-inspired, neon posters or MTV influences, baggy clothes with plaid patterns, fluorescent lighting, vibrant yet faded colors like acid wash denim, high detail on retro textures, preserve the subject\'s pose and key features.',
+        'russia_early_20': 'Redesign the uploaded image in the style of early 20th-century Russia: Art Nouveau influences, ornate wooden furniture, samovar on table, lace curtains, soft gas lamp lighting, imperial colors like deep red and gold, realistic historical accuracy, preserve original layout and main elements.',
         'russia_19': 'Transform the uploaded photo to 19th-century Russian style: neoclassical architecture for rooms, elaborate ball gowns or military uniforms, candlelit ambiance, heavy velvet drapes, earthy tones with accents of emerald, detailed textures like brocade, keep the core subject intact in a romantic era setting.',
-        'victorian': 'Transform the uploaded photo to Victorian era style: ornate furniture and rich fabrics, formal Victorian clothing with high collars and elaborate details, muted sepia tones, gas lamp lighting, detailed wallpaper patterns, maintain the core subject in an elegant 19th-century setting.',
-        'renaissance': 'Transform the uploaded photo to Renaissance era style: classical architecture with marble columns, rich Renaissance clothing with flowing fabrics and intricate embroidery, warm golden lighting like old master paintings, oil painting texture, maintain the core subject in a classical Italian Renaissance setting.'
+        'soviet': 'Edit the uploaded image into Soviet Union era style (1950s-1980s): functional communist design, wooden bookshelves with propaganda posters, simple upholstered furniture, warm bulb lighting, muted colors like beige and gray with red accents, realistic socialist realism vibe, maintain original composition.',
+        'nineties': 'Style the uploaded photo as 1990s aesthetic: grunge or minimalist vibe, bulky furniture like IKEA-inspired, neon posters or MTV influences, baggy clothes with plaid patterns, fluorescent lighting, vibrant yet faded colors like acid wash denim, high detail on retro textures, preserve the subject\'s pose and key features.'
       };
       
       return fallbackPrompts[eraId] || '';
@@ -73,14 +78,24 @@ export class EraStyleService {
    */
   static async isValidEra(eraId: string): Promise<boolean> {
     try {
-      const promptKey = `era_style_${eraId}`;
+      // Если eraId уже содержит префикс era_style_, используем его как есть
+      const promptKey = eraId.startsWith('era_style_') ? eraId : `era_style_${eraId}`;
       const prompt = await PromptService.getRawPrompt(promptKey);
       return prompt !== null;
     } catch (error) {
       console.error(`❌ [ERA_STYLE] Ошибка валидации эпохи "${eraId}":`, error);
       
-      // Резервная валидация
-      const validEras = ['russia_19', 'victorian', 'renaissance'];
+      // Резервная валидация для всех возможных форматов ID
+      const validEras = [
+        'era_style_russia_early_20th',
+        'era_style_russia_19th', 
+        'era_style_soviet_union',
+        'era_style_90s',
+        'russia_early_20',
+        'russia_19', 
+        'soviet',
+        'nineties'
+      ];
       return validEras.includes(eraId);
     }
   }

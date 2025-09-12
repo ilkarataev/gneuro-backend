@@ -1,4 +1,4 @@
-import { QueryInterface } from 'sequelize';
+import { QueryInterface, QueryTypes } from 'sequelize';
 
 const up = async (queryInterface: QueryInterface): Promise<void> => {
   console.log('🔄 [MIGRATION] Заполняем таблицу prompts начальными данными...');
@@ -164,8 +164,34 @@ const up = async (queryInterface: QueryInterface): Promise<void> => {
     }
   ];
 
-  await queryInterface.bulkInsert('prompts', prompts);
-  console.log('✅ [MIGRATION] Промпты успешно добавлены в базу данных');
+  // Проверяем, какие промпты уже существуют, добавляя их по одному с проверкой
+  const existingKeys: string[] = [];
+  for (const prompt of prompts) {
+    try {
+      const existing = await queryInterface.rawSelect('prompts', {
+        where: { key: prompt.key }
+      }, ['key']);
+      
+      if (existing) {
+        existingKeys.push(prompt.key);
+      }
+    } catch (error) {
+      // Игнорируем ошибки при проверке - это может означать, что таблица еще не создана
+    }
+  }
+  
+  console.log('🔍 [MIGRATION] Найдено существующих промптов:', existingKeys.length);
+
+  // Фильтруем только новые промпты
+  const newPrompts = prompts.filter(p => !existingKeys.includes(p.key));
+  
+  if (newPrompts.length > 0) {
+    console.log('📝 [MIGRATION] Добавляем новых промптов:', newPrompts.length);
+    await queryInterface.bulkInsert('prompts', newPrompts);
+    console.log('✅ [MIGRATION] Новые промпты успешно добавлены в базу данных');
+  } else {
+    console.log('ℹ️ [MIGRATION] Все промпты уже существуют в базе данных');
+  }
 };
 
 const down = async (queryInterface: QueryInterface): Promise<void> => {

@@ -63,8 +63,16 @@ export class PhotoStylizationService {
    */
   static async getStylePrompt(styleId: string): Promise<string> {
     try {
-      // Формируем ключ промпта
-      const promptKey = `photo_style_${styleId}`;
+      let promptKey: string;
+      
+      // Определяем правильный ключ в зависимости от типа стиля
+      if (styleId.startsWith('era_style_')) {
+        // Для стилей эпох используем ID как есть
+        promptKey = styleId;
+      } else {
+        // Для обычных стилей добавляем префикс
+        promptKey = `photo_style_${styleId}`;
+      }
       
       // Получаем промпт из базы
       const prompt = await PromptService.getPrompt(promptKey);
@@ -72,12 +80,19 @@ export class PhotoStylizationService {
     } catch (error) {
       console.error(`❌ [PHOTO_STYLE] Ошибка получения промпта для стиля "${styleId}":`, error);
       
-      // Резервные промпты на случай проблем с базой
+      // Резервные промпты на случай проблем с базой (поддерживаем все типы стилей)
       const fallbackPrompts: Record<string, string> = {
+        // Обычные стили фото
         'passport': 'Transform the uploaded photo into a professional passport-style portrait: neutral expression, direct gaze at camera, plain light gray background, even frontal lighting, high sharpness, no shadows or accessories, standard ID photo format, realistic and formal.',
         'glamour': 'Transform the uploaded photo into a glamorous fashion magazine cover: professional studio lighting with soft highlights, elegant pose like a high-fashion model, luxurious background with soft bokeh, flawless skin retouching, vibrant colors with magazine-style color grading, timeless style like fashion magazine cover.',
         'professional': 'Transform the uploaded photo into a professional corporate headshot: confident and approachable expression, business-appropriate lighting with soft shadows, neutral background like office or studio, sharp focus on face, polished and professional appearance suitable for LinkedIn or company website.',
-        'cartoon': 'Transform the uploaded photo into a cartoon-style illustration: vibrant colors, simplified features, smooth gradients, playful and animated appearance like Pixar or Disney style, maintain recognizable facial features while adding cartoon charm.'
+        'cartoon': 'Transform the uploaded photo into a cartoon-style illustration: vibrant colors, simplified features, smooth gradients, playful and animated appearance like Pixar or Disney style, maintain recognizable facial features while adding cartoon charm.',
+        
+        // Стили эпох
+        'era_style_russia_early_20th': 'Redesign the uploaded image in the style of early 20th-century Russia: Art Nouveau influences, ornate wooden furniture, samovar on table, lace curtains, soft gas lamp lighting, imperial colors like deep red and gold, realistic historical accuracy, preserve original layout and main elements.',
+        'era_style_russia_19th': 'Transform the uploaded photo to 19th-century Russian style: neoclassical architecture for rooms, elaborate ball gowns or military uniforms, candlelit ambiance, heavy velvet drapes, earthy tones with accents of emerald, detailed textures like brocade, keep the core subject intact in a romantic era setting.',
+        'era_style_soviet_union': 'Edit the uploaded image into Soviet Union era style (1950s-1980s): functional communist design, wooden bookshelves with propaganda posters, simple upholstered furniture, warm bulb lighting, muted colors like beige and gray with red accents, realistic socialist realism vibe, maintain original composition.',
+        'era_style_90s': 'Style the uploaded photo as 1990s aesthetic: grunge or minimalist vibe, bulky furniture like IKEA-inspired, neon posters or MTV influences, baggy clothes with plaid patterns, fluorescent lighting, vibrant yet faded colors like acid wash denim, high detail on retro textures, preserve the subject\'s pose and key features.'
       };
       
       return fallbackPrompts[styleId] || '';
@@ -89,15 +104,32 @@ export class PhotoStylizationService {
    */
   static async isValidStyle(styleId: string): Promise<boolean> {
     try {
-      const promptKey = `photo_style_${styleId}`;
+      let promptKey: string;
+      
+      // Определяем правильный ключ в зависимости от типа стиля
+      if (styleId.startsWith('era_style_')) {
+        // Для стилей эпох используем ID как есть
+        promptKey = styleId;
+      } else {
+        // Для обычных стилей добавляем префикс
+        promptKey = `photo_style_${styleId}`;
+      }
+      
       const prompt = await PromptService.getRawPrompt(promptKey);
       return prompt !== null;
     } catch (error) {
       console.error(`❌ [PHOTO_STYLE] Ошибка валидации стиля "${styleId}":`, error);
       
-      // Резервная валидация
-      const validStyles = ['passport', 'glamour', 'professional', 'cartoon'];
-      return validStyles.includes(styleId);
+      // Резервная валидация для всех типов стилей
+      const validPhotoStyles = ['passport', 'glamour', 'professional', 'cartoon'];
+      const validEraStyles = [
+        'era_style_russia_early_20th',
+        'era_style_russia_19th', 
+        'era_style_soviet_union',
+        'era_style_90s'
+      ];
+      
+      return validPhotoStyles.includes(styleId) || validEraStyles.includes(styleId);
     }
   }
 
