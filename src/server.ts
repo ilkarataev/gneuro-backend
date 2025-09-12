@@ -594,6 +594,8 @@ app.post('/api/photos/stylize', upload.single('photo'), async (req: MulterReques
  * Создание подготовленного сообщения для отправки изображения через Mini App
  */
 app.post('/api/telegram/prepare-photo-message', async (req: Request, res: Response) => {
+  const startTime = Date.now();
+  
   try {
     const { imageUrl, caption, userId } = req.body;
 
@@ -626,7 +628,8 @@ app.post('/api/telegram/prepare-photo-message', async (req: Request, res: Respon
     );
 
     if (preparedMessageId) {
-      console.log('✅ [PREPARE] Подготовленное сообщение создано:', preparedMessageId);
+      const executionTime = Date.now() - startTime;
+      console.log(`✅ [PREPARE] Подготовленное сообщение создано: ${preparedMessageId} (время выполнения: ${executionTime}ms)`);
       
       res.json({
         success: true,
@@ -634,7 +637,8 @@ app.post('/api/telegram/prepare-photo-message', async (req: Request, res: Respon
         message: 'Подготовленное сообщение создано успешно'
       });
     } else {
-      console.error('❌ [PREPARE] Не удалось создать подготовленное сообщение');
+      const executionTime = Date.now() - startTime;
+      console.error(`❌ [PREPARE] Не удалось создать подготовленное сообщение (время выполнения: ${executionTime}ms)`);
       
       res.status(500).json({
         success: false,
@@ -642,12 +646,31 @@ app.post('/api/telegram/prepare-photo-message', async (req: Request, res: Respon
       });
     }
 
-  } catch (error) {
-    console.error('❌ [PREPARE] Ошибка при создании подготовленного сообщения:', error);
+  } catch (error: any) {
+    const executionTime = Date.now() - startTime;
+    console.error(`❌ [PREPARE] Ошибка при создании подготовленного сообщения (время выполнения: ${executionTime}ms):`, error);
     
-    res.status(500).json({
+    // Определяем тип ошибки для более информативного ответа
+    let errorMessage = 'Произошла техническая ошибка при подготовке сообщения';
+    let statusCode = 500;
+    
+    if (error.code === 'ECONNABORTED') {
+      errorMessage = 'Превышено время ожидания ответа от Telegram. Попробуйте позже';
+      statusCode = 504; // Gateway Timeout
+    } else if (error.response?.status === 400) {
+      errorMessage = 'Неверные данные для создания сообщения';
+      statusCode = 400;
+    } else if (error.response?.status === 401) {
+      errorMessage = 'Ошибка авторизации Telegram бота';
+      statusCode = 503; // Service Unavailable
+    } else if (error.response?.status >= 500) {
+      errorMessage = 'Сервис Telegram временно недоступен. Попробуйте позже';
+      statusCode = 503; // Service Unavailable
+    }
+    
+    res.status(statusCode).json({
       success: false,
-      error: 'Произошла техническая ошибка при подготовке сообщения'
+      error: errorMessage
     });
   }
 });

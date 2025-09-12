@@ -31,6 +31,11 @@ interface BotInfo {
 export class TelegramBotService {
   private static BOT_TOKEN = process.env.BOT_TOKEN;
   private static BASE_URL = `https://api.telegram.org/bot${TelegramBotService.BOT_TOKEN}`;
+  
+  // Настройки таймаутов (можно настраивать через переменные окружения)
+  private static readonly TELEGRAM_API_TIMEOUT = parseInt(process.env.TELEGRAM_API_TIMEOUT || '60000'); // 60 секунд по умолчанию (увеличено с 30)
+  private static readonly IMAGE_CHECK_TIMEOUT = parseInt(process.env.IMAGE_CHECK_TIMEOUT || '20000'); // 20 секунд по умолчанию (увеличено с 10)
+  private static readonly MAX_RETRIES = parseInt(process.env.TELEGRAM_MAX_RETRIES || '5'); // 5 попыток по умолчанию (увеличено с 3)
 
   /**
    * Проверяем наличие токена бота
@@ -49,7 +54,7 @@ export class TelegramBotService {
       console.log('🔍 [TelegramBot] Проверяем доступность изображения:', imageUrl);
       
       const response = await axios.head(imageUrl, {
-        timeout: 5000, // 5 секунд таймаут
+        timeout: TelegramBotService.IMAGE_CHECK_TIMEOUT,
         headers: {
           'User-Agent': 'Telegram Bot'
         }
@@ -70,6 +75,53 @@ export class TelegramBotService {
       console.warn('⚠️ [TelegramBot] Ошибка при проверке изображения:', error instanceof Error ? error.message : error);
       return false;
     }
+  }
+
+  /**
+   * Выполняет HTTP запрос с retry механизмом в случае таймаута
+   */
+  private static async makeRequestWithRetry<T>(
+    url: string,
+    payload: any,
+    maxRetries: number = 3,
+    timeoutMs: number = 30000
+  ): Promise<T> {
+    let lastError: any;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`🔄 [TelegramBot] Попытка ${attempt}/${maxRetries} отправки запроса`);
+        
+        const response = await axios.post<T>(url, payload, {
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          timeout: timeoutMs
+        });
+        
+        console.log(`✅ [TelegramBot] Запрос успешен с попытки ${attempt}`);
+        return response.data;
+        
+      } catch (error: any) {
+        lastError = error;
+        
+        // Проверяем, является ли ошибка таймаутом
+        const isTimeout = error.code === 'ECONNABORTED' || error.message?.includes('timeout');
+        
+        if (isTimeout && attempt < maxRetries) {
+          const delay = Math.min(2000 * Math.pow(2, attempt - 1), 30000); // Экспоненциальная задержка до 30 сек (увеличено с 10)
+          console.log(`⏱️ [TelegramBot] Таймаут на попытке ${attempt}, повторная попытка через ${delay}ms`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+        
+        // Если это не таймаут или это последняя попытка, прерываем
+        console.error(`❌ [TelegramBot] Ошибка на попытке ${attempt}:`, error.message);
+        break;
+      }
+    }
+    
+    throw lastError;
   }
 
   /**
@@ -119,34 +171,40 @@ export class TelegramBotService {
       console.log('📤 [TelegramBot] Отправляем запрос к savePreparedInlineMessage');
       console.log('📤 [TelegramBot] Payload:', JSON.stringify(payload, null, 2));
 
-      const response = await axios.post<TelegramBotResponse<PreparedMessageResult>>(
+      // Используем метод с retry механизмом
+      const responseData = await TelegramBotService.makeRequestWithRetry<TelegramBotResponse<PreparedMessageResult>>(
         `${TelegramBotService.BASE_URL}/savePreparedInlineMessage`,
         payload,
-        {
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          timeout: 10000 // 10 секунд таймаут
-        }
+        TelegramBotService.MAX_RETRIES,
+        TelegramBotService.TELEGRAM_API_TIMEOUT
       );
 
-      console.log('📤 [TelegramBot] Ответ от Telegram API:', response.data);
+      console.log('📤 [TelegramBot] Ответ от Telegram API:', responseData);
 
-      if (response.data?.ok && response.data?.result?.id) {
-        const preparedMessageId = response.data.result.id;
+      if (responseData?.ok && responseData?.result?.id) {
+        const preparedMessageId = responseData.result.id;
         console.log('✅ [TelegramBot] Подготовленное сообщение создано, ID:', preparedMessageId);
         return preparedMessageId;
       } else {
-        console.error('❌ [TelegramBot] Telegram API вернул неуспешный ответ:', response.data);
+        console.error('❌ [TelegramBot] Telegram API вернул неуспешный ответ:', responseData);
         return null;
       }
 
     } catch (error: any) {
       console.error('❌ [TelegramBot] Ошибка при создании подготовленного сообщения:', error);
       
-      if (error.response) {
+      // Детальная обработка различных типов ошибок
+      if (error.code === 'ECONNABORTED') {
+        console.error('❌ [TelegramBot] Все попытки исчерпаны: превышен таймаут запроса к Telegram API');
+      } else if (error.response) {
         console.error('❌ [TelegramBot] Ответ сервера:', error.response.data);
         console.error('❌ [TelegramBot] Статус:', error.response.status);
+        console.error('❌ [TelegramBot] Заголовки:', error.response.headers);
+      } else if (error.request) {
+        console.error('❌ [TelegramBot] Запрос был отправлен, но ответ не получен');
+        console.error('❌ [TelegramBot] Детали запроса:', error.config?.url);
+      } else {
+        console.error('❌ [TelegramBot] Общая ошибка:', error.message);
       }
       
       return null;
@@ -165,7 +223,7 @@ export class TelegramBotService {
 
       const response = await axios.get<TelegramBotResponse<BotInfo>>(
         `${TelegramBotService.BASE_URL}/getMe`,
-        { timeout: 5000 }
+        { timeout: TelegramBotService.TELEGRAM_API_TIMEOUT }
       );
 
       if (response.data?.ok && response.data?.result) {
