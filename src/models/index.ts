@@ -98,6 +98,23 @@ interface ServicePriceAttributes {
 
 interface ServicePriceCreationAttributes extends Optional<ServicePriceAttributes, 'id' | 'created_at' | 'updated_at'> {}
 
+interface PromptAttributes {
+  id: number;
+  key: string;
+  name: string;
+  description?: string;
+  content: string;
+  category: string;
+  variables?: Record<string, any>;
+  is_active: boolean;
+  created_by?: number;
+  version: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+interface PromptCreationAttributes extends Optional<PromptAttributes, 'id' | 'createdAt' | 'updatedAt'> {}
+
 // Модели
 class User extends Model<UserAttributes, UserCreationAttributes> implements UserAttributes {
   public id!: number;
@@ -179,6 +196,22 @@ class ServicePrice extends Model<ServicePriceAttributes, ServicePriceCreationAtt
   public description?: string;
   public created_at!: Date;
   public updated_at!: Date;
+
+  public readonly createdAt!: Date;
+  public readonly updatedAt!: Date;
+}
+
+class Prompt extends Model<PromptAttributes, PromptCreationAttributes> implements PromptAttributes {
+  public id!: number;
+  public key!: string;
+  public name!: string;
+  public description?: string;
+  public content!: string;
+  public category!: string;
+  public variables?: Record<string, any>;
+  public is_active!: boolean;
+  public created_by?: number;
+  public version!: number;
 
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
@@ -466,6 +499,66 @@ ServicePrice.init({
   timestamps: true
 });
 
+Prompt.init({
+  id: {
+    type: DataTypes.INTEGER,
+    autoIncrement: true,
+    primaryKey: true,
+  },
+  key: {
+    type: DataTypes.STRING(100),
+    allowNull: false,
+    unique: true,
+  },
+  name: {
+    type: DataTypes.STRING(255),
+    allowNull: false,
+  },
+  description: {
+    type: DataTypes.TEXT,
+    allowNull: true,
+  },
+  content: {
+    type: DataTypes.TEXT,
+    allowNull: false,
+  },
+  category: {
+    type: DataTypes.STRING(50),
+    allowNull: false,
+    defaultValue: 'general',
+  },
+  variables: {
+    type: DataTypes.JSON,
+    allowNull: true,
+  },
+  is_active: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: true,
+  },
+  created_by: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
+  version: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 1,
+  },
+  createdAt: {
+    type: DataTypes.DATE,
+    allowNull: false,
+  },
+  updatedAt: {
+    type: DataTypes.DATE,
+    allowNull: false,
+  }
+}, {
+  sequelize,
+  tableName: 'prompts',
+  timestamps: true
+});
+
 // Связи между моделями
 User.hasMany(Payment, { foreignKey: 'user_id', as: 'payments' });
 Payment.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
@@ -479,4 +572,4 @@ ApiRequest.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 Photo.hasMany(ApiRequest, { foreignKey: 'photo_id', as: 'requests' });
 ApiRequest.belongsTo(Photo, { foreignKey: 'photo_id', as: 'photo' });
 
-export { sequelize, User, Payment, Photo, ApiRequest, ServicePrice };
+export { sequelize, User, Payment, Photo, ApiRequest, ServicePrice, Prompt };

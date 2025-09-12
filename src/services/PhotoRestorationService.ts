@@ -7,6 +7,7 @@ import { Photo, ApiRequest, User } from '../models/index';
 import { BalanceService } from './BalanceService';
 import { PriceService } from './PriceService';
 import { FileManagerService } from './FileManagerService';
+import { PromptService } from './PromptService';
 
 export interface RestorePhotoRequest {
   userId: number;
@@ -30,7 +31,6 @@ export interface RestorePhotoResult {
 
 export class PhotoRestorationService {
   private static readonly GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'test_key';
-  private static readonly RESTORATION_PROMPT = `Restore this old, faded black-and-white photograph by removing scratches, tears, dust, and any damage. Enhance sharpness, contrast, and details for a clear, high-resolution look. Add realistic, natural colors: warm skin tones, vibrant clothing and objects as appropriate to the era, and a balanced, lifelike color palette throughout the scene.`;
 
   /**
    * Получить текущую стоимость реставрации
@@ -202,8 +202,10 @@ export class PhotoRestorationService {
       });
 
       // Формируем промпт для реставрации
+      const restorationPromptText = await PromptService.getPrompt('photo_restoration_base');
+      
       const prompt = [
-        { text: this.RESTORATION_PROMPT },
+        { text: restorationPromptText },
         {
           inlineData: {
             mimeType: 'image/jpeg',

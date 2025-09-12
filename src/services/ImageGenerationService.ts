@@ -3,6 +3,7 @@ import { Photo, ApiRequest } from '../models/index';
 import { BalanceService } from './BalanceService';
 import { PriceService } from './PriceService';
 import { FileManagerService } from './FileManagerService';
+import { PromptService } from './PromptService';
 
 export interface GenerateImageRequest {
   userId: number;
@@ -461,7 +462,7 @@ export class ImageGenerationService {
     });
 
     // Формируем промпт для генерации изображения
-    const enhancedPrompt = this.enhancePrompt(prompt, options);
+    const enhancedPrompt = await this.enhancePrompt(prompt, options);
 
     const apiPromise = genai.models.generateContent({
       model: "gemini-2.5-flash-image-preview", // Используем модель с поддержкой изображений
@@ -519,21 +520,46 @@ export class ImageGenerationService {
   /**
    * Улучшение промпта для генерации изображений
    */
-  private static enhancePrompt(originalPrompt: string, options?: any): string {
-    let enhancedPrompt = `Create a high-quality digital image: ${originalPrompt}`;
-    
-    if (options?.style) {
-      enhancedPrompt += ` Style: ${options.style}.`;
+  private static async enhancePrompt(originalPrompt: string, options?: any): Promise<string> {
+    try {
+      // Формируем модификаторы стиля и качества
+      let styleModifier = '';
+      let qualityModifier = '';
+
+      if (options?.style) {
+        styleModifier = `Style: ${options.style}.`;
+      }
+      
+      if (options?.quality) {
+        qualityModifier = `Quality: ${options.quality}.`;
+      }
+
+      // Получаем промпт из базы данных
+      const enhancedPrompt = await PromptService.getPrompt('image_generation_base', {
+        originalPrompt,
+        styleModifier,
+        qualityModifier
+      });
+
+      return enhancedPrompt;
+    } catch (error) {
+      console.error('❌ [IMAGE_GEN] Ошибка получения промпта из БД, используем резервный:', error);
+      
+      // Резервный промпт на случай проблем с базой
+      let enhancedPrompt = `Create a high-quality digital image: ${originalPrompt}`;
+      
+      if (options?.style) {
+        enhancedPrompt += ` Style: ${options.style}.`;
+      }
+      
+      if (options?.quality) {
+        enhancedPrompt += ` Quality: ${options.quality}.`;
+      }
+      
+      enhancedPrompt += ' The image should be detailed, visually appealing, and professionally crafted.';
+      
+      return enhancedPrompt;
     }
-    
-    if (options?.quality) {
-      enhancedPrompt += ` Quality: ${options.quality}.`;
-    }
-    
-    // Добавляем общие параметры качества
-    enhancedPrompt += ' The image should be detailed, visually appealing, and professionally crafted.';
-    
-    return enhancedPrompt;
   }
 
   /**
@@ -586,7 +612,7 @@ export class ImageGenerationService {
     });
 
     // Формируем промпт для img2img генерации
-    const enhancedPrompt = this.enhanceImg2ImgPrompt(prompt, options);
+    const enhancedPrompt = await this.enhanceImg2ImgPrompt(prompt, options);
 
     // Подготавливаем контент с референсными изображениями
     const fs = require('fs');
@@ -664,21 +690,46 @@ export class ImageGenerationService {
   /**
    * Улучшение промпта для img2img генерации изображений
    */
-  private static enhanceImg2ImgPrompt(originalPrompt: string, options?: any): string {
-    let enhancedPrompt = `Transform the uploaded image(s) as follows: ${originalPrompt}`;
-    
-    if (options?.style) {
-      enhancedPrompt += ` Apply style: ${options.style}.`;
+  private static async enhanceImg2ImgPrompt(originalPrompt: string, options?: any): Promise<string> {
+    try {
+      // Формируем модификаторы стиля и качества
+      let styleModifier = '';
+      let qualityModifier = '';
+
+      if (options?.style) {
+        styleModifier = `Apply style: ${options.style}.`;
+      }
+      
+      if (options?.quality) {
+        qualityModifier = `Quality: ${options.quality}.`;
+      }
+
+      // Получаем промпт из базы данных
+      const enhancedPrompt = await PromptService.getPrompt('image_generation_img2img', {
+        originalPrompt,
+        styleModifier,
+        qualityModifier
+      });
+
+      return enhancedPrompt;
+    } catch (error) {
+      console.error('❌ [IMAGE_GEN_IMG2IMG] Ошибка получения промпта из БД, используем резервный:', error);
+      
+      // Резервный промпт на случай проблем с базой
+      let enhancedPrompt = `Transform the uploaded image(s) as follows: ${originalPrompt}`;
+      
+      if (options?.style) {
+        enhancedPrompt += ` Apply style: ${options.style}.`;
+      }
+      
+      if (options?.quality) {
+        enhancedPrompt += ` Quality: ${options.quality}.`;
+      }
+      
+      enhancedPrompt += ' Maintain the original composition and key elements while applying the requested changes. The result should be detailed, visually appealing, and professionally crafted.';
+      
+      return enhancedPrompt;
     }
-    
-    if (options?.quality) {
-      enhancedPrompt += ` Quality: ${options.quality}.`;
-    }
-    
-    // Добавляем инструкции для img2img
-    enhancedPrompt += ' Maintain the original composition and key elements while applying the requested changes. The result should be detailed, visually appealing, and professionally crafted.';
-    
-    return enhancedPrompt;
   }
 
   /**

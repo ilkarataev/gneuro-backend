@@ -7,6 +7,7 @@ import { Photo, ApiRequest, User } from '../models/index';
 import { BalanceService } from './BalanceService';
 import { PriceService } from './PriceService';
 import { FileManagerService } from './FileManagerService';
+import { PromptService } from './PromptService';
 
 export interface EraStyleRequest {
   userId: number;
@@ -28,14 +29,6 @@ export interface EraStyleResult {
 
 export class EraStyleService {
   private static readonly GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'test_key';
-  
-  // Предустановленные эпохи с их промптами
-  private static readonly ERA_PROMPTS = {
-    'russia_early_20': 'Redesign the uploaded image in the style of early 20th-century Russia: Art Nouveau influences, ornate wooden furniture, samovar on table, lace curtains, soft gas lamp lighting, imperial colors like deep red and gold, realistic historical accuracy, preserve original layout and main elements.',
-    'russia_19': 'Transform the uploaded photo to 19th-century Russian style: neoclassical architecture for rooms, elaborate ball gowns or military uniforms, candlelit ambiance, heavy velvet drapes, earthy tones with accents of emerald, detailed textures like brocade, keep the core subject intact in a romantic era setting.',
-    'soviet': 'Edit the uploaded image into Soviet Union era style (1950s-1980s): functional communist design, wooden bookshelves with propaganda posters, simple upholstered furniture, warm bulb lighting, muted colors like beige and gray with red accents, realistic socialist realism vibe, maintain original composition.',
-    'nineties': 'Style the uploaded photo as 1990s aesthetic: grunge or minimalist vibe, bulky furniture like IKEA-inspired, neon posters or MTV influences, baggy clothes with plaid patterns, fluorescent lighting, vibrant yet faded colors like acid wash denim, high detail on retro textures, preserve the subject\'s pose and key features.'
-  };
 
   /**
    * Получить текущую стоимость изменения стиля эпохи
@@ -47,15 +40,43 @@ export class EraStyleService {
   /**
    * Получить промпт для выбранной эпохи
    */
-  static getEraPrompt(eraId: string): string {
-    return this.ERA_PROMPTS[eraId as keyof typeof this.ERA_PROMPTS] || '';
+  static async getEraPrompt(eraId: string): Promise<string> {
+    try {
+      // Формируем ключ промпта
+      const promptKey = `era_style_${eraId}`;
+      
+      // Получаем промпт из базы
+      const prompt = await PromptService.getPrompt(promptKey);
+      return prompt;
+    } catch (error) {
+      console.error(`❌ [ERA_STYLE] Ошибка получения промпта для эпохи "${eraId}":`, error);
+      
+      // Резервные промпты на случай проблем с базой
+      const fallbackPrompts: Record<string, string> = {
+        'russia_19': 'Transform the uploaded photo to 19th-century Russian style: neoclassical architecture for rooms, elaborate ball gowns or military uniforms, candlelit ambiance, heavy velvet drapes, earthy tones with accents of emerald, detailed textures like brocade, keep the core subject intact in a romantic era setting.',
+        'victorian': 'Transform the uploaded photo to Victorian era style: ornate furniture and rich fabrics, formal Victorian clothing with high collars and elaborate details, muted sepia tones, gas lamp lighting, detailed wallpaper patterns, maintain the core subject in an elegant 19th-century setting.',
+        'renaissance': 'Transform the uploaded photo to Renaissance era style: classical architecture with marble columns, rich Renaissance clothing with flowing fabrics and intricate embroidery, warm golden lighting like old master paintings, oil painting texture, maintain the core subject in a classical Italian Renaissance setting.'
+      };
+      
+      return fallbackPrompts[eraId] || '';
+    }
   }
 
   /**
    * Валидировать выбранную эпоху
    */
-  static isValidEra(eraId: string): boolean {
-    return Object.keys(this.ERA_PROMPTS).includes(eraId);
+  static async isValidEra(eraId: string): Promise<boolean> {
+    try {
+      const promptKey = `era_style_${eraId}`;
+      const prompt = await PromptService.getRawPrompt(promptKey);
+      return prompt !== null;
+    } catch (error) {
+      console.error(`❌ [ERA_STYLE] Ошибка валидации эпохи "${eraId}":`, error);
+      
+      // Резервная валидация
+      const validEras = ['russia_19', 'victorian', 'renaissance'];
+      return validEras.includes(eraId);
+    }
   }
 
   /**
@@ -102,7 +123,8 @@ export class EraStyleService {
       console.log('🏛️ [ERA_STYLE] originalFilename:', request.originalFilename);
 
       // Валидация эпохи
-      if (!this.isValidEra(request.eraId)) {
+      const isValid = await this.isValidEra(request.eraId);
+      if (!isValid) {
         console.log('❌ [ERA_STYLE] Неверная эпоха:', request.eraId);
         return {
           success: false,

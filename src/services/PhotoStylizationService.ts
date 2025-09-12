@@ -7,6 +7,7 @@ import { Photo, ApiRequest, User } from '../models/index';
 import { BalanceService } from './BalanceService';
 import { PriceService } from './PriceService';
 import { FileManagerService } from './FileManagerService';
+import { PromptService } from './PromptService';
 
 export interface StylizePhotoRequest {
   userId: number;
@@ -29,20 +30,6 @@ export interface StylizePhotoResult {
 
 export class PhotoStylizationService {
   private static readonly GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'test_key';
-  
-  // Предустановленные стили с их промптами
-  private static readonly STYLE_PROMPTS = {
-    'passport': 'Transform the uploaded photo into a professional passport-style portrait: neutral expression, direct gaze at camera, plain light gray background, even frontal lighting, high sharpness, no shadows or accessories, standard ID photo format, realistic and formal.',
-    'glamour': 'Transform the uploaded photo into a glamorous fashion magazine cover: professional studio lighting with soft highlights, elegant pose like a high-fashion model, luxurious background with soft bokeh, flawless skin retouching, vibrant colors with magazine-style color grading, timeless style like fashion magazine cover.',
-    'autumn': 'Convert the uploaded photo into an autumn forest photoshoot: person standing among golden and red fall leaves, misty atmosphere, warm sunlight filtering through trees, natural pose with wind-swept hair, realistic outdoor scene, vibrant seasonal colors, high resolution.',
-    'cinema': 'Style the uploaded image as a cinematic movie still: dramatic lighting with lens flare, wide-angle composition like a Hollywood film scene, intense expression, subtle depth of field blur on background, noir or epic vibe, preserve original subject\'s features, 35mm film grain.',
-    'poet': 'Modify the uploaded photo to include a famous poet (like Pushkin or Byron) beside the subject: intimate literary setting in a cozy library or garden, soft natural light, thoughtful poses as if in conversation, realistic historical attire for the poet, warm and inspirational atmosphere, high detail on faces and books.',
-    // Эпохи для изменения стиля
-    'russia_early_20': 'Redesign the uploaded image in the style of early 20th-century Russia: Art Nouveau influences, ornate wooden furniture, samovar on table, lace curtains, soft gas lamp lighting, imperial colors like deep red and gold, realistic historical accuracy, preserve original layout and main elements.',
-    'russia_19': 'Transform the uploaded photo to 19th-century Russian style: neoclassical architecture for rooms, elaborate ball gowns or military uniforms, candlelit ambiance, heavy velvet drapes, earthy tones with accents of emerald, detailed textures like brocade, keep the core subject intact in a romantic era setting.',
-    'soviet': 'Edit the uploaded image into Soviet Union era style (1950s-1980s): functional communist design, wooden bookshelves with propaganda posters, simple upholstered furniture, warm bulb lighting, muted colors like beige and gray with red accents, realistic socialist realism vibe, maintain original composition.',
-    'nineties': 'Style the uploaded photo as 1990s aesthetic: grunge or minimalist vibe, bulky furniture like IKEA-inspired, neon posters or MTV influences, baggy clothes with plaid patterns, fluorescent lighting, vibrant yet faded colors like acid wash denim, high detail on retro textures, preserve the subject\'s pose and key features.'
-  };
 
   /**
    * Получить текущую стоимость стилизации
@@ -68,15 +55,44 @@ export class PhotoStylizationService {
   /**
    * Получить промпт для выбранного стиля
    */
-  static getStylePrompt(styleId: string): string {
-    return this.STYLE_PROMPTS[styleId as keyof typeof this.STYLE_PROMPTS] || '';
+  static async getStylePrompt(styleId: string): Promise<string> {
+    try {
+      // Формируем ключ промпта
+      const promptKey = `photo_style_${styleId}`;
+      
+      // Получаем промпт из базы
+      const prompt = await PromptService.getPrompt(promptKey);
+      return prompt;
+    } catch (error) {
+      console.error(`❌ [PHOTO_STYLE] Ошибка получения промпта для стиля "${styleId}":`, error);
+      
+      // Резервные промпты на случай проблем с базой
+      const fallbackPrompts: Record<string, string> = {
+        'passport': 'Transform the uploaded photo into a professional passport-style portrait: neutral expression, direct gaze at camera, plain light gray background, even frontal lighting, high sharpness, no shadows or accessories, standard ID photo format, realistic and formal.',
+        'glamour': 'Transform the uploaded photo into a glamorous fashion magazine cover: professional studio lighting with soft highlights, elegant pose like a high-fashion model, luxurious background with soft bokeh, flawless skin retouching, vibrant colors with magazine-style color grading, timeless style like fashion magazine cover.',
+        'professional': 'Transform the uploaded photo into a professional corporate headshot: confident and approachable expression, business-appropriate lighting with soft shadows, neutral background like office or studio, sharp focus on face, polished and professional appearance suitable for LinkedIn or company website.',
+        'cartoon': 'Transform the uploaded photo into a cartoon-style illustration: vibrant colors, simplified features, smooth gradients, playful and animated appearance like Pixar or Disney style, maintain recognizable facial features while adding cartoon charm.'
+      };
+      
+      return fallbackPrompts[styleId] || '';
+    }
   }
 
   /**
    * Валидировать выбранный стиль
    */
-  static isValidStyle(styleId: string): boolean {
-    return Object.keys(this.STYLE_PROMPTS).includes(styleId);
+  static async isValidStyle(styleId: string): Promise<boolean> {
+    try {
+      const promptKey = `photo_style_${styleId}`;
+      const prompt = await PromptService.getRawPrompt(promptKey);
+      return prompt !== null;
+    } catch (error) {
+      console.error(`❌ [PHOTO_STYLE] Ошибка валидации стиля "${styleId}":`, error);
+      
+      // Резервная валидация
+      const validStyles = ['passport', 'glamour', 'professional', 'cartoon'];
+      return validStyles.includes(styleId);
+    }
   }
 
   /**
@@ -91,7 +107,8 @@ export class PhotoStylizationService {
       console.log('🎨 [STYLIZE] originalFilename:', request.originalFilename);
 
       // Валидация стиля
-      if (!this.isValidStyle(request.styleId)) {
+      const isValid = await this.isValidStyle(request.styleId);
+      if (!isValid) {
         console.log('❌ [STYLIZE] Неверный стиль:', request.styleId);
         return {
           success: false,
