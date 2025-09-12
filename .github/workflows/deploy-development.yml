@@ -68,7 +68,9 @@ jobs:
 
           # Поднимаем compose
           echo "🧩 Starting docker-compose..."
-          ssh -o StrictHostKeyChecking=no ${USER}@${REMOTE} "cd ${DESTINATION_PATH} && docker compose -f ${DOCKER_COMPOSE_FILE} up -d --build"
+          ssh -o StrictHostKeyChecking=no ${USER}@${REMOTE} "cd ${DESTINATION_PATH} && docker compose -f ${DOCKER_COMPOSE_FILE} down --volumes --remove-orphans"
+          ssh -o StrictHostKeyChecking=no ${USER}@${REMOTE} "cd ${DESTINATION_PATH} && docker system prune -f && docker compose -f ${DOCKER_COMPOSE_FILE} build --no-cache"
+          ssh -o StrictHostKeyChecking=no ${USER}@${REMOTE} "cd ${DESTINATION_PATH} && docker compose -f ${DOCKER_COMPOSE_FILE} up -d"
 
           echo "✅ Development deployment completed successfully!"
 
