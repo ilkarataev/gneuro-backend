@@ -4,6 +4,23 @@ const up = async (queryInterface: QueryInterface): Promise<void> => {
   console.log('🔄 [MIGRATION] Заполняем таблицу prompts начальными данными...');
 
   const prompts = [
+    // 1) Image Generation промпты - Базовый для text2img
+    {
+      key: 'image_generation_base',
+      name: 'Базовый промпт для генерации изображений (text2img)',
+      description: 'Основной промпт для text2img генерации изображений',
+      content: 'Create a high-quality digital image: {originalPrompt}. {styleModifier} {qualityModifier} The image should be detailed, visually appealing, and professionally crafted, high resolution.',
+      category: 'image_generation',
+      variables: JSON.stringify({
+        originalPrompt: 'string',
+        styleModifier: 'string',
+        qualityModifier: 'string'
+      }),
+      is_active: true,
+      version: 1,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    },
     // 1) Image Generation промпты - Добавление фото + свой промпт
     {
       key: 'image_generation_img2img',
@@ -155,6 +172,7 @@ const down = async (queryInterface: QueryInterface): Promise<void> => {
   console.log('🔄 [MIGRATION] Удаляем начальные данные промптов...');
   
   const promptKeys = [
+    'image_generation_base',
     'image_generation_img2img',
     'photo_style_passport',
     'photo_style_studio',
