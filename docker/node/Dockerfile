@@ -14,10 +14,6 @@ COPY *.json ./
 COPY services ./services
 COPY src ./src
 RUN npm run build
-# COPY middlewares ./middlewares
-# COPY controllers ./controllers
-# COPY routes ./routes
-# COPY migrations ./migrations
 
 ENTRYPOINT [ "npm", "run","start" ]
 
