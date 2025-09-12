@@ -34,6 +34,7 @@
     "dev": "nodemon src/server.ts",
     "start": "node dist/server.js",
     "migrate": "ts-node src/migrate.ts",
+    "migrate-queue": "ts-node src/run-migration.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

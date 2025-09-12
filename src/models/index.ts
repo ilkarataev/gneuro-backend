@@ -57,7 +57,7 @@ interface PhotoAttributes {
   original_height: number;
   file_size: number;
   mime_type: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'queued';
   request_params?: string;
   processing_time?: number;
   error_message?: string;
@@ -74,7 +74,7 @@ interface ApiRequestAttributes {
   request_data?: string;
   response_data?: string;
   prompt?: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'queued';
   cost: number;
   external_task_id?: string;
   request_date: Date;
@@ -140,7 +140,7 @@ class Photo extends Model<PhotoAttributes, PhotoCreationAttributes> implements P
   public original_height!: number;
   public file_size!: number;
   public mime_type!: string;
-  public status!: 'pending' | 'processing' | 'completed' | 'failed';
+  public status!: 'pending' | 'processing' | 'completed' | 'failed' | 'queued';
   public request_params?: string;
   public processing_time?: number;
   public error_message?: string;
@@ -158,7 +158,7 @@ class ApiRequest extends Model<ApiRequestAttributes, ApiRequestCreationAttribute
   public request_data?: string;
   public response_data?: string;
   public prompt?: string;
-  public status!: 'pending' | 'processing' | 'completed' | 'failed';
+  public status!: 'pending' | 'processing' | 'completed' | 'failed' | 'queued';
   public cost!: number;
   public external_task_id?: string;
   public request_date!: Date;
@@ -326,7 +326,7 @@ Photo.init({
     allowNull: true
   },
   status: {
-    type: DataTypes.ENUM('pending', 'processing', 'completed', 'failed'),
+    type: DataTypes.ENUM('pending', 'processing', 'completed', 'failed', 'queued'),
     allowNull: false,
     defaultValue: 'pending'
   },
@@ -391,7 +391,7 @@ ApiRequest.init({
     allowNull: true,
   },
   status: {
-    type: DataTypes.ENUM('pending', 'processing', 'completed', 'failed'),
+    type: DataTypes.ENUM('pending', 'processing', 'completed', 'failed', 'queued'),
     defaultValue: 'pending'
   },
   cost: { 
@@ -479,4 +479,109 @@ ApiRequest.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 Photo.hasMany(ApiRequest, { foreignKey: 'photo_id', as: 'requests' });
 ApiRequest.belongsTo(Photo, { foreignKey: 'photo_id', as: 'photo' });
 
-export { sequelize, User, Payment, Photo, ApiRequest, ServicePrice };
+// Интерфейсы для очередей
+interface QueueJobAttributes {
+  id: number;
+  job_type: string;
+  payload: string; // JSON строка с данными задачи
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'retrying';
+  retry_count: number;
+  max_retries: number;
+  next_retry_at?: Date;
+  started_at?: Date;
+  completed_at?: Date;
+  error_message?: string;
+  created_at: Date;
+  updated_at: Date;
+}
+
+interface QueueJobCreationAttributes extends Optional<QueueJobAttributes, 'id' | 'retry_count' | 'created_at' | 'updated_at'> {}
+
+// Модель для очередей
+class QueueJob extends Model<QueueJobAttributes, QueueJobCreationAttributes> 
+  implements QueueJobAttributes {
+  public id!: number;
+  public job_type!: string;
+  public payload!: string;
+  public status!: 'pending' | 'processing' | 'completed' | 'failed' | 'retrying';
+  public retry_count!: number;
+  public max_retries!: number;
+  public next_retry_at?: Date;
+  public started_at?: Date;
+  public completed_at?: Date;
+  public error_message?: string;
+  public readonly created_at!: Date;
+  public readonly updated_at!: Date;
+}
+
+QueueJob.init({
+  id: {
+    type: DataTypes.INTEGER,
+    autoIncrement: true,
+    primaryKey: true,
+  },
+  job_type: {
+    type: DataTypes.STRING(100),
+    allowNull: false,
+  },
+  payload: {
+    type: DataTypes.TEXT('long'),
+    allowNull: false,
+  },
+  status: {
+    type: DataTypes.ENUM('pending', 'processing', 'completed', 'failed', 'retrying'),
+    allowNull: false,
+    defaultValue: 'pending'
+  },
+  retry_count: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 0
+  },
+  max_retries: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 5
+  },
+  next_retry_at: {
+    type: DataTypes.DATE,
+    allowNull: true
+  },
+  started_at: {
+    type: DataTypes.DATE,
+    allowNull: true
+  },
+  completed_at: {
+    type: DataTypes.DATE,
+    allowNull: true
+  },
+  error_message: {
+    type: DataTypes.TEXT,
+    allowNull: true
+  },
+  created_at: {
+    type: DataTypes.DATE,
+    defaultValue: DataTypes.NOW
+  },
+  updated_at: {
+    type: DataTypes.DATE,
+    defaultValue: DataTypes.NOW
+  }
+}, {
+  sequelize,
+  tableName: 'queue_jobs',
+  timestamps: true,
+  indexes: [
+    {
+      fields: ['status']
+    },
+    {
+      fields: ['job_type']
+    },
+    {
+      fields: ['next_retry_at']
+    }
+  ]
+});
+
+export { sequelize, User, Payment, Photo, ApiRequest, ServicePrice, QueueJob };

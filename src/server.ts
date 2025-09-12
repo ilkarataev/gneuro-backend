@@ -7,7 +7,9 @@ import { PhotoRestorationService } from './services/PhotoRestorationService';
 import { PhotoStylizationService } from './services/PhotoStylizationService';
 import { EraStyleService } from './services/EraStyleService';
 import { FileManagerService } from './services/FileManagerService';
-import { ImageGenerationService } from './services/ImageGenerationService';
+import { QueuedImageGenerationService } from './services/QueuedImageGenerationService';
+import { QueueService } from './services/QueueService';
+import { ErrorHandlingService } from './services/ErrorHandlingService';
 import { BalanceService } from './services/BalanceService';
 import { TelegramBotService } from './services/TelegramBotService';
 import pricesRouter from './routes/prices';
@@ -71,6 +73,54 @@ app.get('/health', (req: Request, res: Response) => {
     message: 'Server is healthy',
     timestamp: new Date().toISOString() 
   });
+});
+
+/**
+ * Получить статистику очередей
+ */
+app.get('/api/queue/stats', async (req, res) => {
+  try {
+    const stats = await QueueService.getQueueStats();
+    res.json({
+      success: true,
+      stats
+    });
+  } catch (error) {
+    console.error('❌ Ошибка при получении статистики очередей:', error);
+    const errorResponse = ErrorHandlingService.handleError(error instanceof Error ? error : new Error('Неизвестная ошибка'));
+    res.status(500).json(errorResponse);
+  }
+});
+
+/**
+ * Получить статус задачи по ID фото
+ */
+app.get('/api/photos/:photoId/status', async (req, res) => {
+  try {
+    const { photoId } = req.params;
+    const result = await QueuedImageGenerationService.getJobStatusByPhotoId(parseInt(photoId));
+    res.json(result);
+  } catch (error) {
+    console.error('❌ Ошибка при получении статуса задачи:', error);
+    const errorResponse = ErrorHandlingService.handleError(error instanceof Error ? error : new Error('Неизвестная ошибка'));
+    res.status(500).json(errorResponse);
+  }
+});
+
+/**
+ * Получить все задачи пользователя
+ */
+app.get('/api/users/:userId/jobs', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { limit } = req.query;
+    const result = await QueuedImageGenerationService.getUserJobs(parseInt(userId), limit ? parseInt(limit as string) : 10);
+    res.json(result);
+  } catch (error) {
+    console.error('❌ Ошибка при получении задач пользователя:', error);
+    const errorResponse = ErrorHandlingService.handleError(error instanceof Error ? error : new Error('Неизвестная ошибка'));
+    res.status(500).json(errorResponse);
+  }
 });
 
 // Подключаем роуты
@@ -858,44 +908,48 @@ app.post('/api/photos/era-style', upload.single('photo'), async (req: MulterRequ
 });
 
 /**
- * Генерация изображения по промпту
+ * Генерация изображения по промпту (через очереди)
  */
 app.post('/api/images/generate', async (req, res) => {
   try {
     const { userId, telegramId, prompt, options } = req.body;
     
-    console.log('🎨 [IMAGE_GEN] Начинаем процесс генерации изображения');
+    console.log('🎨 [IMAGE_GEN] Начинаем процесс генерации изображения через очереди');
     console.log('🎨 [IMAGE_GEN] userId (database):', userId);
     console.log('🎨 [IMAGE_GEN] telegramId:', telegramId);
     console.log('🎨 [IMAGE_GEN] prompt:', prompt?.substring(0, 100) + '...');
     console.log('🎨 [IMAGE_GEN] options:', options);
     
     if (!userId) {
-      return res.status(400).json({ error: 'userId обязателен' });
+      const errorResponse = ErrorHandlingService.handleError('userId обязателен', 'INVALID_REQUEST');
+      return res.status(400).json(errorResponse);
     }
 
     if (!telegramId) {
-      return res.status(400).json({ error: 'telegramId обязателен' });
+      const errorResponse = ErrorHandlingService.handleError('telegramId обязателен', 'INVALID_REQUEST');
+      return res.status(400).json(errorResponse);
     }
 
     if (!prompt || prompt.trim().length === 0) {
-      return res.status(400).json({ error: 'prompt обязателен' });
+      const errorResponse = ErrorHandlingService.handleError('prompt обязателен', 'INVALID_REQUEST');
+      return res.status(400).json(errorResponse);
     }
 
-    // Запускаем процесс генерации изображения
-    console.log('🎨 [IMAGE_GEN] Вызываем ImageGenerationService...');
-    const result = await ImageGenerationService.generateImage({
+    // Добавляем задачу в очередь
+    console.log('🎨 [IMAGE_GEN] Добавляем в очередь через QueuedImageGenerationService...');
+    const result = await QueuedImageGenerationService.queueImageGeneration({
       userId: parseInt(userId),
       telegramId: parseInt(telegramId),
       prompt: prompt.trim(),
       options: options || {}
     });
 
-    console.log('🎨 [IMAGE_GEN] Результат генерации:', result);
+    console.log('🎨 [IMAGE_GEN] Результат добавления в очередь:', result);
     res.json(result);
   } catch (error) {
-    console.error('❌ [IMAGE_GEN] Ошибка при генерации изображения:', error);
-    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+    console.error('❌ [IMAGE_GEN] Ошибка при добавлении в очередь:', error);
+    const errorResponse = ErrorHandlingService.handleError(error instanceof Error ? error : new Error('Неизвестная ошибка'));
+    res.status(500).json(errorResponse);
   }
 });
 
@@ -904,11 +958,12 @@ app.post('/api/images/generate', async (req, res) => {
  */
 app.get('/api/images/generation-cost', async (req, res) => {
   try {
-    const cost = await ImageGenerationService.getGenerationCost();
+    const cost = await QueuedImageGenerationService.getGenerationCost();
     res.json({ cost });
   } catch (error) {
     console.error('Ошибка при получении стоимости генерации изображения:', error);
-    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+    const errorResponse = ErrorHandlingService.handleError(error instanceof Error ? error : new Error('Неизвестная ошибка'));
+    res.status(500).json(errorResponse);
   }
 });
 
@@ -1029,32 +1084,23 @@ app.post('/api/photos/generate', upload.none(), async (req, res) => {
     console.log('🎨 [PHOTOS/GENERATE] prompt:', prompt?.substring(0, 100) + '...');
     
     if (!userId || isNaN(parseInt(userId))) {
-      return res.status(400).json({ 
-        success: false,
-        error: 'userId обязателен и должен быть числом',
-        message: 'userId обязателен и должен быть числом'
-      });
+      const errorResponse = ErrorHandlingService.handleError('userId обязателен и должен быть числом', 'INVALID_REQUEST');
+      return res.status(400).json(errorResponse);
     }
 
     if (!telegramId || isNaN(parseInt(telegramId))) {
-      return res.status(400).json({ 
-        success: false,
-        error: 'telegramId обязателен и должен быть числом',
-        message: 'telegramId обязателен и должен быть числом'
-      });
+      const errorResponse = ErrorHandlingService.handleError('telegramId обязателен и должен быть числом', 'INVALID_REQUEST');
+      return res.status(400).json(errorResponse);
     }
 
     if (!prompt || prompt.trim().length === 0) {
-      return res.status(400).json({ 
-        success: false,
-        error: 'prompt обязателен',
-        message: 'prompt обязателен'
-      });
+      const errorResponse = ErrorHandlingService.handleError('prompt обязателен', 'INVALID_REQUEST');
+      return res.status(400).json(errorResponse);
     }
 
-    // Запускаем процесс генерации изображения
-    console.log('🎨 [PHOTOS/GENERATE] Вызываем ImageGenerationService...');
-    const result = await ImageGenerationService.generateImage({
+    // Добавляем задачу в очередь
+    console.log('🎨 [PHOTOS/GENERATE] Добавляем в очередь через QueuedImageGenerationService...');
+    const result = await QueuedImageGenerationService.queueImageGeneration({
       userId: parseInt(userId),
       telegramId: parseInt(telegramId),
       prompt: prompt.trim(),
@@ -1065,12 +1111,9 @@ app.post('/api/photos/generate', upload.none(), async (req, res) => {
     console.log('🎨 [PHOTOS/GENERATE] Результат генерации:', result);
     res.json(result);
   } catch (error) {
-    console.error('❌ [PHOTOS/GENERATE] Ошибка при генерации изображения:', error);
-    res.status(500).json({ 
-      success: false,
-      error: 'Внутренняя ошибка сервера',
-      message: 'Внутренняя ошибка сервера'
-    });
+    console.error('❌ [PHOTOS/GENERATE] Ошибка при добавлении в очередь:', error);
+    const errorResponse = ErrorHandlingService.handleError(error instanceof Error ? error : new Error('Неизвестная ошибка'));
+    res.status(500).json(errorResponse);
   }
 });
 
@@ -1131,9 +1174,9 @@ app.post('/api/photos/generate-img2img', upload.array('referenceImages', 8), asy
       });
     }
 
-    // Запускаем процесс генерации изображения с референсами
-    console.log('🎨 [PHOTOS/GENERATE-IMG2IMG] Вызываем ImageGenerationService...');
-    const result = await ImageGenerationService.generateImageWithReference({
+    // Добавляем задачу в очередь
+    console.log('🎨 [PHOTOS/GENERATE-IMG2IMG] Добавляем в очередь через QueuedImageGenerationService...');
+    const result = await QueuedImageGenerationService.queueImageGenerationWithReference({
       userId: parseInt(userId),
       telegramId: parseInt(telegramId),
       prompt: prompt.trim(),
@@ -1213,4 +1256,9 @@ app.listen(PORT, () => {
     require('fs').mkdirSync(tempDir, { recursive: true });
     console.log('📁 Создана временная папка uploads/temp/');
   }
+
+  // Запускаем систему очередей
+  console.log('🚀 Инициализация системы очередей...');
+  QueueService.startProcessor();
+  console.log('✅ Система очередей запущена');
 });
