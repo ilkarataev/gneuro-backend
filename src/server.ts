@@ -6,10 +6,12 @@ import { validate, parse } from '@telegram-apps/init-data-node';
 import { PhotoRestorationService } from './services/PhotoRestorationService';
 import { PhotoStylizationService } from './services/PhotoStylizationService';
 import { EraStyleService } from './services/EraStyleService';
+import { PoetStyleService } from './services/PoetStyleService';
 import { FileManagerService } from './services/FileManagerService';
 import { ImageGenerationService } from './services/ImageGenerationService';
 import { BalanceService } from './services/BalanceService';
 import { TelegramBotService } from './services/TelegramBotService';
+import { ImageCopyService } from './services/ImageCopyService';
 import pricesRouter from './routes/prices';
 import webhookRouter from './routes/webhook';
 
@@ -271,7 +273,18 @@ app.post('/api/photos/restore', upload.single('photo'), async (req: MulterReques
     });
 
     console.log('📸 [RESTORE] Результат реставрации:', result);
-    res.json(result);
+    
+    // Проверяем результат и возвращаем соответствующий статус
+    if (result.success) {
+      res.json(result);
+    } else {
+      // При неуспешной обработке возвращаем статус 422 (Unprocessable Entity)
+      // и передаем понятное сообщение об ошибке клиенту
+      res.status(422).json({ 
+        error: result.error || 'Сервис временно недоступен, попробуйте чуть позже',
+        success: false
+      });
+    }
   } catch (error) {
     console.error('❌ [RESTORE] Ошибка при реставрации фото:', error);
     
@@ -288,7 +301,10 @@ app.post('/api/photos/restore', upload.single('photo'), async (req: MulterReques
       }
     }
     
-    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+    res.status(500).json({ 
+      error: 'Сервис временно недоступен, попробуйте чуть позже',
+      success: false
+    });
   }
 });/**
  * Получить статус реставрации фото
@@ -566,7 +582,17 @@ app.post('/api/photos/stylize', upload.single('photo'), async (req: MulterReques
     });
 
     console.log('🎨 [STYLIZE] Результат стилизации:', result);
-    res.json(result);
+    
+    // Проверяем результат и возвращаем соответствующий статус
+    if (result.success) {
+      res.json(result);
+    } else {
+      // При неуспешной обработке возвращаем статус 422 (Unprocessable Entity)
+      res.status(422).json({ 
+        error: result.error || 'Сервис временно недоступен, попробуйте чуть позже',
+        success: false
+      });
+    }
   } catch (error) {
     console.error('❌ [STYLIZE] Ошибка при стилизации фото:', error);
     
@@ -585,7 +611,7 @@ app.post('/api/photos/stylize', upload.single('photo'), async (req: MulterReques
     
     res.status(500).json({
       success: false,
-      error: 'Произошла техническая ошибка. Попробуйте позже'
+      error: 'Сервис временно недоступен, попробуйте чуть позже'
     });
   }
 });
@@ -835,16 +861,22 @@ app.post('/api/photos/era-style', upload.single('photo'), async (req: MulterRequ
     // Определяем промпт: если передан custom prompt, используем его, иначе берем из предустановленной эпохи
     let finalPrompt = prompt;
     if (!prompt || prompt.trim().length === 0) {
-      finalPrompt = EraStyleService.getEraPrompt(eraId);
+      console.log('🔍 [ERA_STYLE] Получаем промпт из БД для эпохи:', eraId);
+      finalPrompt = await EraStyleService.getEraPrompt(eraId);
+      console.log('📝 [ERA_STYLE] Промпт из БД получен:', finalPrompt ? 'успешно' : 'не найден');
       if (!finalPrompt) {
+        console.log('❌ [ERA_STYLE] Промпт не найден для эпохи:', eraId);
         return res.status(400).json({
           success: false,
           error: 'Неверная эпоха или промпт не найден'
         });
       }
+    } else {
+      console.log('📝 [ERA_STYLE] Используется пользовательский промпт');
     }
 
-    console.log('🏛️ [ERA_STYLE] finalPrompt:', finalPrompt?.substring(0, 150) + '...');
+    console.log('🏛️ [ERA_STYLE] finalPrompt длина:', finalPrompt?.length);
+    console.log('🏛️ [ERA_STYLE] finalPrompt содержание:', finalPrompt?.substring(0, 200) + '...');
 
     const result = await EraStyleService.stylePhotoByEra({
       userId: parseInt(userId),
@@ -877,6 +909,183 @@ app.post('/api/photos/era-style', upload.single('photo'), async (req: MulterRequ
       success: false,
       error: 'Произошла техническая ошибка. Попробуйте позже'
     });
+  }
+});
+
+/**
+ * Получить доступных поэтов для стилизации
+ */
+app.get('/api/photos/poets', async (req, res) => {
+  try {
+    const poets = await PoetStyleService.getAvailablePoets();
+    res.json({
+      success: true,
+      poets
+    });
+  } catch (error) {
+    console.error('Ошибка при получении поэтов:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Внутренняя ошибка сервера'
+    });
+  }
+});
+
+/**
+ * Получить стоимость стилизации с поэтом
+ */
+app.get('/api/photos/poet-style-cost', async (req, res) => {
+  try {
+    const cost = await PoetStyleService.getPoetStyleCost();
+    res.json({
+      success: true,
+      cost: cost,
+      currency: 'RUB'
+    });
+  } catch (error) {
+    console.error('Ошибка при получении стоимости стилизации с поэтом:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Внутренняя ошибка сервера'
+    });
+  }
+});
+
+/**
+ * Стилизация с поэтом
+ */
+app.post('/api/photos/poet-style', upload.single('photo'), async (req: MulterRequest, res: Response) => {
+  try {
+    const { userId, telegramId, prompt, poetId } = req.body;
+    
+    console.log('🎭 [POET_STYLE] Начинаем процесс создания селфи с поэтом');
+    console.log('🎭 [POET_STYLE] userId (database):', userId);
+    console.log('🎭 [POET_STYLE] telegramId:', telegramId);
+    console.log('🎭 [POET_STYLE] poetId:', poetId);
+    console.log('🎭 [POET_STYLE] prompt длина:', prompt?.length || 0);
+    console.log('🎭 [POET_STYLE] file:', req.file ? req.file.filename : 'отсутствует');
+    
+    // Валидация входных данных
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: 'Файл не был загружен'
+      });
+    }
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'userId обязателен'
+      });
+    }
+
+    if (!telegramId) {
+      return res.status(400).json({
+        success: false,
+        error: 'telegramId обязателен'
+      });
+    }
+
+    if (!poetId) {
+      return res.status(400).json({
+        success: false,
+        error: 'poetId обязателен'
+      });
+    }
+
+    // Валидация размера файла
+    if (req.file.size > 10 * 1024 * 1024) {
+      return res.status(400).json({
+        success: false,
+        error: 'Размер файла не должен превышать 10MB'
+      });
+    }
+
+    // Валидация типа файла
+    if (!req.file.mimetype.startsWith('image/')) {
+      return res.status(400).json({
+        success: false,
+        error: 'Поддерживаются только изображения'
+      });
+    }
+
+    // Перемещаем файл из временной папки в структуру папок пользователя
+    const moduleName = 'poet_style';
+    const finalPath = FileManagerService.moveFileToUserDirectory(
+      req.file.path,
+      parseInt(telegramId),
+      moduleName,
+      req.file.filename
+    );
+    
+    // Формируем URL к файлу
+    const imageFullUrl = FileManagerService.createFileUrl(
+      parseInt(telegramId),
+      moduleName,
+      req.file.filename
+    );
+    
+    console.log('🎭 [POET_STYLE] finalPath:', finalPath);
+    console.log('🎭 [POET_STYLE] imageFullUrl:', imageFullUrl);
+
+    // Запускаем процесс создания селфи с поэтом
+    console.log('🎭 [POET_STYLE] Вызываем PoetStyleService...');
+    const result = await PoetStyleService.stylePhotoWithPoet({
+      userId: parseInt(userId),
+      telegramId: parseInt(telegramId),
+      imageUrl: imageFullUrl,
+      localPath: finalPath,
+      poetId: parseInt(poetId),
+      prompt: prompt || undefined,
+      originalFilename: req.file.originalname
+    });
+
+    console.log('🎭 [POET_STYLE] Результат создания селфи:', result);
+    res.json(result);
+  } catch (error) {
+    console.error('❌ [POET_STYLE] Ошибка при создании селфи с поэтом:', error);
+    
+    // Удаляем временный файл в случае ошибки
+    if (req.file && req.file.path) {
+      try {
+        const fs = require('fs');
+        if (fs.existsSync(req.file.path)) {
+          fs.unlinkSync(req.file.path);
+          console.log('🗑️ Удален временный файл:', req.file.path);
+        }
+      } catch (unlinkError) {
+        console.error('❌ Ошибка при удалении временного файла:', unlinkError);
+      }
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: 'Произошла техническая ошибка. Попробуйте позже'
+    });
+  }
+});
+
+/**
+ * Получить историю стилизаций с поэтами пользователя
+ * GET /api/photos/history/:userId/poet-style
+ */
+app.get('/api/photos/history/:userId/poet-style', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { page = 1, limit = 10 } = req.query;
+    
+    const history = await PhotoRestorationService.getUserPhotoHistoryByModule(
+      parseInt(userId),
+      'poet_style',
+      parseInt(page as string),
+      parseInt(limit as string)
+    );
+    
+    res.json(history);
+  } catch (error) {
+    console.error('Ошибка при получении истории стилизаций с поэтами:', error);
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
   }
 });
 
@@ -1220,7 +1429,7 @@ app.use((error: MulterError | Error, req: Request, res: Response, next: NextFunc
   res.status(500).json({ error: 'Внутренняя ошибка сервера' });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`Server run on port: ${PORT}`);
   
   // Создаем базовую папку uploads, если она не существует
@@ -1235,5 +1444,12 @@ app.listen(PORT, () => {
   if (!require('fs').existsSync(tempDir)) {
     require('fs').mkdirSync(tempDir, { recursive: true });
     console.log('📁 Создана временная папка uploads/temp/');
+  }
+
+  // Копируем изображения из папки images в uploads
+  try {
+    await ImageCopyService.copyImagesOnStartup();
+  } catch (error) {
+    console.error('❌ Ошибка при копировании изображений при запуске:', error);
   }
 });

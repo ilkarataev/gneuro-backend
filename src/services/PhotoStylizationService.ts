@@ -227,16 +227,6 @@ export class PhotoStylizationService {
         
         console.log('🔗 [STYLIZE] URL стилизованного изображения:', styledUrl);
 
-        // Списываем средства с баланса пользователя
-        console.log('💸 [STYLIZE] Списываем средства с баланса...');
-        await BalanceService.debitBalance({
-          userId: request.userId,
-          amount: stylizationCost,
-          type: 'debit',
-          description: `Стилизация фото (${request.styleId})`,
-          referenceId: apiRequest.id.toString()
-        });
-
         // Обновляем статус запроса на completed
         await apiRequest.update({
           status: 'completed',
@@ -246,6 +236,16 @@ export class PhotoStylizationService {
             stylizedFilename,
             cost: stylizationCost
           })
+        });
+
+        // Списываем средства с баланса пользователя только после успешного завершения
+        console.log('💸 [STYLIZE] Списываем средства с баланса...');
+        await BalanceService.debitBalance({
+          userId: request.userId,
+          amount: stylizationCost,
+          type: 'debit',
+          description: `Стилизация фото (${request.styleId})`,
+          referenceId: apiRequest.id.toString()
         });
 
         console.log('✅ [STYLIZE] Стилизация завершена успешно');
@@ -270,7 +270,7 @@ export class PhotoStylizationService {
 
         return {
           success: false,
-          error: 'Временная ошибка обработки. Попробуйте позже'
+          error: 'Сервис временно недоступен, попробуйте чуть позже'
         };
       }
 
@@ -278,7 +278,7 @@ export class PhotoStylizationService {
       console.error('💥 [STYLIZE] Критическая ошибка стилизации:', error);
       return {
         success: false,
-        error: 'Произошла техническая ошибка. Попробуйте позже'
+        error: 'Сервис временно недоступен, попробуйте чуть позже'
       };
     }
   }

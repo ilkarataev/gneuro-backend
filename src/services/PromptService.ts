@@ -20,14 +20,19 @@ export class PromptService {
    */
   static async getPrompt(key: string, variables: PromptVariables = {}, options: GetPromptOptions = {}): Promise<string> {
     try {
+      console.log(`🔍 [PROMPT] Запрос промпта для ключа: "${key}"`);
+      
       // Проверяем кэш, если он разрешен
       if (options.cache !== false) {
         const cachedPrompt = this.getCachedPrompt(key);
         if (cachedPrompt) {
+          console.log(`💾 [PROMPT] Промпт "${key}" найден в кэше`);
           return this.fillVariables(cachedPrompt, variables);
         }
       }
 
+      console.log(`🗄️ [PROMPT] Ищем промпт "${key}" в базе данных...`);
+      
       // Получаем промпт из базы
       const whereClause: any = {
         key,
@@ -36,6 +41,7 @@ export class PromptService {
 
       if (options.version) {
         whereClause.version = options.version;
+        console.log(`🔢 [PROMPT] Ищем конкретную версию: ${options.version}`);
       }
 
       const prompt = await Prompt.findOne({
@@ -44,14 +50,15 @@ export class PromptService {
       });
 
       if (!prompt) {
-        console.error(`❌ [PROMPT] Промпт с ключом "${key}" не найден`);
+        console.error(`❌ [PROMPT] Промпт с ключом "${key}" не найден в базе данных`);
         throw new Error(`Промпт с ключом "${key}" не найден`);
       }
 
       // Сохраняем в кэш
       this.setCachedPrompt(key, prompt.content);
 
-      console.log(`✅ [PROMPT] Получен промпт "${key}" версии ${prompt.version}`);
+      console.log(`✅ [PROMPT] Получен промпт "${key}" версии ${prompt.version}, длина: ${prompt.content.length}`);
+      console.log(`📝 [PROMPT] Содержание промпта: ${prompt.content.substring(0, 100)}...`);
       
       // Заполняем переменные и возвращаем
       return this.fillVariables(prompt.content, variables);
@@ -66,6 +73,8 @@ export class PromptService {
    */
   static async getRawPrompt(key: string, options: GetPromptOptions = {}): Promise<Prompt | null> {
     try {
+      console.log(`🔍 [PROMPT] Запрос сырого промпта для ключа: "${key}"`);
+      
       const whereClause: any = {
         key,
         is_active: true
@@ -73,12 +82,21 @@ export class PromptService {
 
       if (options.version) {
         whereClause.version = options.version;
+        console.log(`🔢 [PROMPT] Ищем конкретную версию: ${options.version}`);
       }
 
-      return await Prompt.findOne({
+      const prompt = await Prompt.findOne({
         where: whereClause,
         order: [['version', 'DESC']]
       });
+      
+      if (prompt) {
+        console.log(`✅ [PROMPT] Сырой промпт "${key}" найден, версия: ${prompt.version}`);
+      } else {
+        console.log(`❌ [PROMPT] Сырой промпт "${key}" не найден`);
+      }
+      
+      return prompt;
     } catch (error) {
       console.error(`❌ [PROMPT] Ошибка получения сырого промпта "${key}":`, error);
       return null;

@@ -13,7 +13,6 @@ COPY *.js ./
 COPY *.json ./
 COPY services ./services
 COPY src ./src
+COPY images ./images
 RUN npm run build
-
 ENTRYPOINT [ "npm", "run","start" ]
-

@@ -132,9 +132,10 @@ export class PhotoRestorationService {
           error_message: errorMessage
         });
 
+        // Возвращаем более понятное сообщение пользователю
         return { 
           success: false, 
-          error: 'Ошибка при обращении к сервису реставрации'
+          error: 'Сервис временно недоступен, попробуйте чуть позже'
         };
       }
 
@@ -142,7 +143,7 @@ export class PhotoRestorationService {
       console.error('Ошибка в restorePhoto:', error);
       return { 
         success: false, 
-        error: 'Внутренняя ошибка сервера'
+        error: 'Сервис временно недоступен, попробуйте чуть позже'
       };
     }
   }
@@ -492,7 +493,7 @@ export class PhotoRestorationService {
    */
   static async getUserPhotoHistoryByModule(
     userId: number, 
-    moduleType: 'photo_restore' | 'photo_stylize' | 'era_style' | 'image_generate',
+    moduleType: 'photo_restore' | 'photo_stylize' | 'era_style' | 'image_generate'| 'poet_style',
     page: number = 1, 
     limit: number = 10
   ): Promise<{

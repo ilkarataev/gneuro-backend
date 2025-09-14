@@ -51,8 +51,16 @@ export class EraStyleService {
       // Если eraId уже содержит префикс era_style_, используем его как есть
       const promptKey = eraId.startsWith('era_style_') ? eraId : `era_style_${eraId}`;
       
+      console.log('🔍 [ERA_STYLE] Ищем промпт для ключа:', promptKey);
+      
       // Получаем промпт из базы
       const prompt = await PromptService.getPrompt(promptKey);
+      
+      console.log('📝 [ERA_STYLE] Промпт из БД получен:', prompt ? `да (длина: ${prompt.length})` : 'нет');
+      if (prompt) {
+        console.log('📝 [ERA_STYLE] Содержание промпта:', prompt.substring(0, 100) + '...');
+      }
+      
       return prompt;
     } catch (error) {
       console.error(`❌ [ERA_STYLE] Ошибка получения промпта для эпохи "${eraId}":`, error);
@@ -69,7 +77,13 @@ export class EraStyleService {
         'nineties': 'Style the uploaded photo as 1990s aesthetic: grunge or minimalist vibe, bulky furniture like IKEA-inspired, neon posters or MTV influences, baggy clothes with plaid patterns, fluorescent lighting, vibrant yet faded colors like acid wash denim, high detail on retro textures, preserve the subject\'s pose and key features.'
       };
       
-      return fallbackPrompts[eraId] || '';
+      const fallbackPrompt = fallbackPrompts[eraId] || '';
+      console.log('🔄 [ERA_STYLE] Используем fallback промпт для эпохи:', eraId, fallbackPrompt ? 'найден' : 'не найден');
+      if (fallbackPrompt) {
+        console.log('📝 [ERA_STYLE] Fallback промпт:', fallbackPrompt.substring(0, 100) + '...');
+      }
+      
+      return fallbackPrompt;
     }
   }
 
@@ -188,21 +202,6 @@ export class EraStyleService {
 
       console.log('💳 [ERA_STYLE] Создан запрос API с ID:', apiRequest.id);
       
-      // Списываем средства с баланса пользователя
-      console.log('💰 [ERA_STYLE] Списываем средства с баланса...');
-      const balanceResult = await BalanceService.debit(request.userId, stylizationCost, `Изменение стиля эпохи: ${request.eraId}`);
-
-      if (!balanceResult.success) {
-        console.log('❌ [ERA_STYLE] Ошибка списания средств');
-        await apiRequest.update({ status: 'failed', error_message: balanceResult.error });
-        return {
-          success: false,
-          error: balanceResult.error || 'Ошибка списания средств'
-        };
-      }
-
-      console.log('✅ [ERA_STYLE] Средства списаны, новый баланс:', balanceResult.balance);
-
       // Обновляем статус на "processing"
       await apiRequest.update({ status: 'processing' });
 
@@ -218,9 +217,6 @@ export class EraStyleService {
       if (!processingResult.success) {
         console.log('❌ [ERA_STYLE] Ошибка обработки изображения:', processingResult.error);
         
-        // Возвращаем деньги пользователю
-        await BalanceService.credit(request.userId, stylizationCost, `Возврат за ошибку изменения стиля эпохи: ${request.eraId}`);
-
         await apiRequest.update({ 
           status: 'failed', 
           error_message: processingResult.error 
@@ -228,7 +224,7 @@ export class EraStyleService {
 
         return {
           success: false,
-          error: processingResult.error
+          error: 'Сервис временно недоступен, попробуйте чуть позже'
         };
       }
 
@@ -241,6 +237,16 @@ export class EraStyleService {
         }),
         completed_date: new Date()
       });
+
+      // Списываем средства с баланса пользователя только после успешного завершения
+      console.log('💰 [ERA_STYLE] Списываем средства с баланса...');
+      const balanceResult = await BalanceService.debit(request.userId, stylizationCost, `Изменение стиля эпохи: ${request.eraId}`);
+
+      if (!balanceResult.success) {
+        console.log('❌ [ERA_STYLE] Ошибка списания средств');
+        // В случае ошибки списания возвращаем результат как успешный, но логируем ошибку
+        console.error('⚠️ [ERA_STYLE] Не удалось списать средства, но обработка прошла успешно');
+      }
 
       console.log('✅ [ERA_STYLE] Изменение стиля эпохи завершено');
 
@@ -256,7 +262,7 @@ export class EraStyleService {
       console.error('💥 [ERA_STYLE] Непредвиденная ошибка:', error);
       return {
         success: false,
-        error: 'Внутренняя ошибка сервера'
+        error: 'Сервис временно недоступен, попробуйте чуть позже'
       };
     }
   }
@@ -273,7 +279,9 @@ export class EraStyleService {
   ): Promise<{ success: boolean; styledUrl?: string; error?: string }> {
     try {
       console.log('🎨 [ERA_STYLE] Начинаем обработку изображения...');
+      console.log('🎨 [ERA_STYLE] eraId:', eraId);
       console.log('🎨 [ERA_STYLE] prompt длина:', prompt.length);
+      console.log('🎨 [ERA_STYLE] prompt содержание:', prompt.substring(0, 150) + '...');
 
       // Читаем изображение
       const imagePath = path.resolve(imageUrl);
@@ -461,6 +469,10 @@ export class EraStyleService {
    * Вызов Gemini API для стилизации изображения в стиле эпохи
    */
   private static async callGeminiEraStyleAPI(imageBuffer: Buffer, prompt: string): Promise<Buffer> {
+    console.log('🤖 [GEMINI] Подготавливаем запрос к API...');
+    console.log('🤖 [GEMINI] Промпт для отправки в API:', prompt);
+    console.log('🤖 [GEMINI] Размер изображения:', imageBuffer.length, 'байт');
+    
     // Инициализируем Google GenAI
     const genAI = new GoogleGenAI({ 
       apiKey: this.GEMINI_API_KEY
