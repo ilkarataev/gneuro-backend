@@ -17,6 +17,7 @@ export interface StylizePhotoRequest {
   styleId: string;
   prompt: string;
   originalFilename: string;
+  adminRetry?: boolean; // Флаг для отключения списания баланса при админском перезапуске
 }
 
 export interface StylizePhotoResult {
@@ -240,14 +241,19 @@ export class PhotoStylizationService {
         });
 
         // Списываем средства с баланса пользователя только после успешного завершения
-        console.log('💸 [STYLIZE] Списываем средства с баланса...');
-        await BalanceService.debitBalance({
-          userId: request.userId,
-          amount: stylizationCost,
-          type: 'debit',
-          description: `Стилизация фото (${request.styleId})`,
-          referenceId: apiRequest.id.toString()
-        });
+        // Пропускаем списание при админском перезапуске
+        if (!request.adminRetry) {
+          console.log('💸 [STYLIZE] Списываем средства с баланса...');
+          await BalanceService.debitBalance({
+            userId: request.userId,
+            amount: stylizationCost,
+            type: 'debit',
+            description: `Стилизация фото (${request.styleId})`,
+            referenceId: apiRequest.id.toString()
+          });
+        } else {
+          console.log('🔧 [STYLIZE] Админский перезапуск - пропускаем списание баланса');
+        }
 
         console.log('✅ [STYLIZE] Стилизация завершена успешно');
 

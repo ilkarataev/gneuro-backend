@@ -15,6 +15,7 @@ export interface GenerateImageRequest {
     size?: string;
     quality?: string;
   };
+  adminRetry?: boolean; // Флаг для отключения списания баланса при админском перезапуске
 }
 
 export interface GenerateImageWithReferenceRequest {
@@ -28,6 +29,7 @@ export interface GenerateImageWithReferenceRequest {
     size?: string;
     quality?: string;
   };
+  adminRetry?: boolean; // Флаг для отключения списания баланса при админском перезапуске
 }
 
 export interface GenerateImageResult {
@@ -229,13 +231,18 @@ export class ImageGenerationService {
           });
 
           // Списываем деньги с баланса
-          await BalanceService.debitBalance({
-            userId: request.userId,
-            amount: generationCost,
-            type: 'debit',
-            description: 'Генерация изображения',
-            referenceId: `photo_${photo.id}`
-          });
+          // Пропускаем списание при админском перезапуске
+          if (!request.adminRetry) {
+            await BalanceService.debitBalance({
+              userId: request.userId,
+              amount: generationCost,
+              type: 'debit',
+              description: 'Генерация изображения',
+              referenceId: `photo_${photo.id}`
+            });
+          } else {
+            console.log('🔧 [IMAGE_GEN] Админский перезапуск - пропускаем списание баланса');
+          }
 
           return {
             success: true,
@@ -362,13 +369,18 @@ export class ImageGenerationService {
           });
 
           // Списываем деньги с баланса
-          await BalanceService.debitBalance({
-            userId: request.userId,
-            amount: generationCost,
-            type: 'debit',
-            description: 'Генерация изображения с референсом',
-            referenceId: `photo_${photo.id}`
-          });
+          // Пропускаем списание при админском перезапуске
+          if (!request.adminRetry) {
+            await BalanceService.debitBalance({
+              userId: request.userId,
+              amount: generationCost,
+              type: 'debit',
+              description: 'Генерация изображения с референсом',
+              referenceId: `photo_${photo.id}`
+            });
+          } else {
+            console.log('🔧 [IMAGE_GEN_REF] Админский перезапуск - пропускаем списание баланса');
+          }
 
           return {
             success: true,

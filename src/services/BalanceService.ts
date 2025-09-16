@@ -79,7 +79,8 @@ export class BalanceService {
       first_name: userData.firstName,
       last_name: userData.lastName,
       balance: 20, // Начальный бонус 20 рублей для новых пользователей
-      status: 'active'
+      status: 'active',
+      is_admin: false
     });
     
     await Payment.create({

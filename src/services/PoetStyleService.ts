@@ -15,6 +15,7 @@ export interface PoetStyleRequest {
   poetId: number;
   prompt?: string;
   originalFilename?: string;
+  adminRetry?: boolean; // Флаг для отключения списания баланса при админском перезапуске
 }
 
 export interface PoetStyleResult {
@@ -273,13 +274,18 @@ export class PoetStyleService {
           });
 
           // Списываем деньги с баланса
-          await BalanceService.debitBalance({
-            userId: request.userId,
-            amount: styleCost,
-            type: 'debit',
-            description: `Стилизация в стиле ${poet.name}`,
-            referenceId: `photo_${photo.id}`
-          });
+          // Пропускаем списание при админском перезапуске
+          if (!request.adminRetry) {
+            await BalanceService.debitBalance({
+              userId: request.userId,
+              amount: styleCost,
+              type: 'debit',
+              description: `Стилизация в стиле ${poet.name}`,
+              referenceId: `photo_${photo.id}`
+            });
+          } else {
+            console.log('🔧 [POET_STYLE] Админский перезапуск - пропускаем списание баланса');
+          }
 
           return {
             success: true,

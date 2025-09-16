@@ -14,6 +14,7 @@ import { TelegramBotService } from './services/TelegramBotService';
 import { ImageCopyService } from './services/ImageCopyService';
 import pricesRouter from './routes/prices';
 import webhookRouter from './routes/webhook';
+import adminRouter from './routes/admin';
 
 // Расширяем тип Request для multer
 interface MulterRequest extends Request {
@@ -78,6 +79,7 @@ app.get('/health', (req: Request, res: Response) => {
 // Подключаем роуты
 app.use('/api/prices', pricesRouter);
 app.use('/api/webhook', webhookRouter);
+app.use('/api/admin', adminRouter);
 
 // Маршруты
 
@@ -172,7 +174,8 @@ app.post('/api/auth/telegram', async (req, res) => {
         username: user.username,
         firstName: user.first_name,
         lastName: user.last_name,
-        languageCode: user.language_code
+        languageCode: user.language_code,
+        isAdmin: existingUser.is_admin || false
       },
       balance
     };

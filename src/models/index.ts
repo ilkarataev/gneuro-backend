@@ -29,6 +29,7 @@ interface UserAttributes {
   reg_date: Date;
   last_activity: Date;
   leadtech_contact_id?: number;
+  is_admin: boolean;
 }
 
 interface UserCreationAttributes extends Optional<UserAttributes, 'id' | 'reg_date' | 'last_activity'> {}
@@ -80,9 +81,11 @@ interface ApiRequestAttributes {
   request_date: Date;
   completed_date?: Date;
   error_message?: string;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
-interface ApiRequestCreationAttributes extends Optional<ApiRequestAttributes, 'id' | 'request_date'> {}
+interface ApiRequestCreationAttributes extends Optional<ApiRequestAttributes, 'id' | 'request_date' | 'createdAt' | 'updatedAt'> {}
 
 interface ServicePriceAttributes {
   id: number;
@@ -141,6 +144,7 @@ class User extends Model<UserAttributes, UserCreationAttributes> implements User
   public reg_date!: Date;
   public last_activity!: Date;
   public leadtech_contact_id?: number;
+  public is_admin!: boolean;
 
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
@@ -185,7 +189,7 @@ class ApiRequest extends Model<ApiRequestAttributes, ApiRequestCreationAttribute
   public user_id!: number;
   public photo_id?: number;
   public api_name!: string;
-  public request_type!: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit' | 'photo_stylize' | 'era_style';
+  public request_type!: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit' | 'photo_stylize' | 'era_style' | 'poet_style';
   public request_data?: string;
   public response_data?: string;
   public prompt?: string;
@@ -287,6 +291,11 @@ User.init({
   last_activity: { 
     type: DataTypes.DATE, 
     defaultValue: DataTypes.NOW 
+  },
+  is_admin: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false
   }
 }, {
   sequelize,
@@ -472,6 +481,16 @@ ApiRequest.init({
   error_message: {
     type: DataTypes.TEXT,
     allowNull: true
+  },
+  createdAt: {
+    type: DataTypes.DATE,
+    allowNull: false,
+    defaultValue: DataTypes.NOW
+  },
+  updatedAt: {
+    type: DataTypes.DATE,
+    allowNull: false,
+    defaultValue: DataTypes.NOW
   }
 }, {
   sequelize,

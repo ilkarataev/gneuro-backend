@@ -16,6 +16,7 @@ export interface EraStyleRequest {
   eraId: string;
   prompt: string;
   originalFilename: string;
+  adminRetry?: boolean; // Флаг для отключения списания баланса при админском перезапуске
 }
 
 export interface EraStyleResult {

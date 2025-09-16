@@ -19,6 +19,7 @@ export interface RestorePhotoRequest {
     scratch_removal?: boolean;
     color_correction?: boolean;
   };
+  adminRetry?: boolean; // Флаг для отключения списания баланса при админском перезапуске
 }
 
 export interface RestorePhotoResult {
@@ -103,13 +104,18 @@ export class PhotoRestorationService {
         });
 
         // Списываем деньги с баланса
-        await BalanceService.debitBalance({
-          userId: request.userId,
-          amount: restorationCost,
-          type: 'debit',
-          description: 'Реставрация фотографии',
-          referenceId: `photo_${photo.id}`
-        });
+        // Пропускаем списание при админском перезапуске
+        if (!request.adminRetry) {
+          await BalanceService.debitBalance({
+            userId: request.userId,
+            amount: restorationCost,
+            type: 'debit',
+            description: 'Реставрация фотографии',
+            referenceId: `photo_${photo.id}`
+          });
+        } else {
+          console.log('🔧 [RESTORE] Админский перезапуск - пропускаем списание баланса');
+        }
 
         return {
           success: true,
