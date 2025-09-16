@@ -180,18 +180,18 @@ router.post('/stuck-tasks/:id/restart', requireAdmin, async (req: Request, res: 
         });
         break;
 
-      case 'photo_stylize':
-        result = await PhotoStylizationService.stylizePhoto({
-          userId: stuckTask.user_id,
-          telegramId: telegramId,
-          imageUrl: requestData.imageUrl,
-          localPath: requestData.localPath,
-          styleId: requestData.styleId,
-          prompt: requestData.prompt,
-          originalFilename: requestData.originalFilename,
-          adminRetry
-        });
-        break;
+        case 'photo_stylize':
+          result = await PhotoStylizationService.stylizePhoto({
+            userId: stuckTask.user_id,
+            telegramId: telegramId,
+            imageUrl: requestData.imageUrl,
+            localPath: requestData.localPath,
+            styleId: requestData.styleId,
+            prompt: stuckTask.prompt || requestData.prompt || '',
+            originalFilename: requestData.originalFilename,
+            adminRetry
+          });
+          break;
 
       case 'era_style':
         result = await EraStyleService.stylePhotoByEra({
@@ -199,7 +199,7 @@ router.post('/stuck-tasks/:id/restart', requireAdmin, async (req: Request, res: 
           telegramId: telegramId,
           imageUrl: requestData.imageUrl,
           eraId: requestData.eraId,
-          prompt: requestData.prompt || stuckTask.prompt || '',
+          prompt: stuckTask.prompt || requestData.prompt || '',
           originalFilename: requestData.originalFilename,
           adminRetry
         });
@@ -212,7 +212,7 @@ router.post('/stuck-tasks/:id/restart', requireAdmin, async (req: Request, res: 
           imageUrl: requestData.imageUrl,
           localPath: requestData.localPath,
           poetId: requestData.poetId,
-          prompt: requestData.prompt || stuckTask.prompt || '',
+          prompt: stuckTask.prompt || requestData.prompt || '',
           originalFilename: requestData.originalFilename,
           adminRetry
         });
@@ -222,7 +222,7 @@ router.post('/stuck-tasks/:id/restart', requireAdmin, async (req: Request, res: 
         result = await ImageGenerationService.generateImage({
           userId: stuckTask.user_id,
           telegramId: telegramId,
-          prompt: requestData.prompt || stuckTask.prompt || '',
+          prompt: stuckTask.prompt || requestData.prompt || '',
           moduleName: requestData.moduleName,
           options: requestData.options || {},
           adminRetry
@@ -356,7 +356,7 @@ router.post('/api-requests/:id/retry', requireAdmin, async (req: Request, res: R
             imageUrl: requestData.imageUrl,
             localPath: requestData.localPath,
             styleId: requestData.styleId,
-            prompt: requestData.prompt,
+            prompt: apiRequest.prompt || requestData.prompt || '',
             originalFilename: requestData.originalFilename,
             adminRetry
           });
@@ -368,7 +368,7 @@ router.post('/api-requests/:id/retry', requireAdmin, async (req: Request, res: R
             telegramId: telegramId,
             imageUrl: requestData.imageUrl,
             eraId: requestData.eraId,
-            prompt: requestData.prompt || apiRequest.prompt || '',
+            prompt: apiRequest.prompt || requestData.prompt || '',
             originalFilename: requestData.originalFilename,
             adminRetry
           });
@@ -381,7 +381,7 @@ router.post('/api-requests/:id/retry', requireAdmin, async (req: Request, res: R
             imageUrl: requestData.imageUrl,
             localPath: requestData.localPath,
             poetId: requestData.poetId,
-            prompt: requestData.prompt || apiRequest.prompt || '',
+            prompt: apiRequest.prompt || requestData.prompt || '',
             originalFilename: requestData.originalFilename,
             adminRetry
           });
@@ -391,7 +391,7 @@ router.post('/api-requests/:id/retry', requireAdmin, async (req: Request, res: R
           result = await ImageGenerationService.generateImage({
             userId: apiRequest.user_id,
             telegramId: telegramId,
-            prompt: requestData.prompt || apiRequest.prompt || '',
+            prompt: apiRequest.prompt || requestData.prompt || '',
             moduleName: requestData.moduleName,
             options: requestData.options || {},
             adminRetry
