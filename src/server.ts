@@ -483,6 +483,7 @@ app.post('/api/photos/stylize', upload.single('photo'), async (req: MulterReques
     console.log('🎨 [STYLIZE] userId (database):', userId);
     console.log('🎨 [STYLIZE] telegramId:', telegramId);
     console.log('🎨 [STYLIZE] styleId:', styleId);
+    console.log('🎨 [STYLIZE] prompt:', prompt);
     console.log('🎨 [STYLIZE] prompt длина:', prompt?.length || 0);
     console.log('🎨 [STYLIZE] file:', req.file ? req.file.filename : 'отсутствует');
     
@@ -508,7 +509,8 @@ app.post('/api/photos/stylize', upload.single('photo'), async (req: MulterReques
       });
     }
 
-    if (!prompt) {
+    // Для era_style промпт не обязателен - он загружается из базы данных
+    if (!prompt && !styleId?.startsWith('era_style_')) {
       return res.status(400).json({
         success: false,
         error: 'prompt обязателен'
@@ -560,17 +562,22 @@ app.post('/api/photos/stylize', upload.single('photo'), async (req: MulterReques
     // Определяем промпт: если передан custom prompt, используем его, иначе берем из предустановленного стиля
     let finalPrompt = prompt;
     if (!prompt || prompt.trim().length === 0) {
-      finalPrompt = PhotoStylizationService.getStylePrompt(styleId);
+      console.log('🔍 [STYLIZE] Загружаем промпт из базы данных для стиля:', styleId);
+      finalPrompt = await PhotoStylizationService.getStylePrompt(styleId);
+      console.log('📝 [STYLIZE] Промпт из базы данных:', finalPrompt ? 'загружен' : 'не найден');
       if (!finalPrompt) {
         return res.status(400).json({
           success: false,
           error: 'Неверный стиль или промпт'
         });
       }
+    } else {
+      console.log('📝 [STYLIZE] Используется пользовательский промпт');
     }
 
     // Запускаем процесс стилизации
     console.log('🎨 [STYLIZE] Вызываем PhotoStylizationService...');
+    console.log('🎨 [STYLIZE] finalPrompt:', finalPrompt);
     const result = await PhotoStylizationService.stylizePhoto({
       userId: parseInt(userId),
       telegramId: parseInt(telegramId),

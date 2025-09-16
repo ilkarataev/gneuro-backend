@@ -142,6 +142,7 @@ export class PhotoStylizationService {
       console.log('🎨 [STYLIZE] userId:', request.userId);
       console.log('🎨 [STYLIZE] telegramId:', request.telegramId);
       console.log('🎨 [STYLIZE] styleId:', request.styleId);
+      console.log('🎨 [STYLIZE] prompt:', request.prompt);
       console.log('🎨 [STYLIZE] originalFilename:', request.originalFilename);
 
       // Валидация стиля
@@ -172,9 +173,9 @@ export class PhotoStylizationService {
       }
 
       // Определяем тип запроса в зависимости от стиля
-      const eraStyles = ['russia_early_20', 'russia_19', 'soviet', 'nineties'];
-      const requestType = eraStyles.includes(request.styleId) ? 'era_style' : 'photo_stylize';
-      const apiName = eraStyles.includes(request.styleId) ? 'gemini_era_style' : 'gemini_stylize';
+      const isEraStyle = request.styleId.startsWith('era_style_');
+      const requestType = isEraStyle ? 'era_style' : 'photo_stylize';
+      const apiName = isEraStyle ? 'gemini_era_style' : 'gemini_stylize';
       
       // Создаем запрос в базе данных
       const apiRequest = await ApiRequest.create({
@@ -189,7 +190,7 @@ export class PhotoStylizationService {
           originalFilename: request.originalFilename,
           imageUrl: request.imageUrl,
           operation: requestType,
-          ...(eraStyles.includes(request.styleId) && { eraId: request.styleId })
+          ...(isEraStyle && { eraId: request.styleId })
         })
       });
 
@@ -312,7 +313,7 @@ export class PhotoStylizationService {
       const mimeType = this.getMimeTypeFromPath(imagePath);
 
       console.log('🖼️ [GEMINI] Отправляем изображение на стилизацию...');
-      console.log('📝 [GEMINI] Промпт:', prompt.substring(0, 100) + '...');
+      console.log('📝 [GEMINI] Промпт:', prompt ? prompt.substring(0, 100) + '...' : 'undefined');
 
       // Формируем промпт для стилизации
       const apiPrompt = [
