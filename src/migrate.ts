@@ -6,6 +6,7 @@ import { up as createPoetsTable } from './migrations/20250115_create_poets_table
 import { up as seedPoetsData } from './migrations/20250115_seed_poets_data';
 import { up as seedPoetStylePrompts } from './migrations/20250115_seed_poet_style_prompts';
 import { up as addPoetStylePrice } from './migrations/20250115_add_poet_style_price';
+import { up as updatePoetSelfiePrompt } from './migrations/20250916_update_poet_selfie_prompt';
 
 
 async function runMigrations() {
@@ -89,6 +90,16 @@ async function runMigrations() {
       } else {
         throw error;
       }
+    }
+
+    // Обновляем промпт для селфи с поэтами
+    console.log('Начало обновления промпта для селфи с поэтами...');
+    try {
+      await updatePoetSelfiePrompt(sequelize.getQueryInterface());
+      console.log('Промпт для селфи с поэтами обновлен!');
+    } catch (error: any) {
+      console.error('Ошибка при обновлении промпта для селфи с поэтами:', error);
+      throw error;
     }
     
     console.log('Все миграции успешно применены!');

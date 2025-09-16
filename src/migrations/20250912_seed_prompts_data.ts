@@ -1,4 +1,4 @@
-import { QueryInterface, QueryTypes } from 'sequelize';
+import { QueryInterface } from 'sequelize';
 
 const up = async (queryInterface: QueryInterface): Promise<void> => {
   console.log('🔄 [MIGRATION] Заполняем таблицу prompts начальными данными...');
@@ -128,7 +128,7 @@ const up = async (queryInterface: QueryInterface): Promise<void> => {
       key: 'era_style_soviet_union',
       name: 'Советский Союз',
       description: 'Стилизация под эпоху СССР',
-      content: 'Use the uploaded photo as the sole identity and geometry reference. LOCK CAMERA & COMPOSITION: maintain identical angle, focal-length look, distance, framing/crop, aspect ratio, subject scale and DoF. Preserve pose, expression.\nChange only clothing, light and environment to USSR functional style, 1970s.\nOutfit: utilitarian Soviet wardrobe—simple tailored jacket or worker\'s coat, plain shirt/top, structured overcoat in colder setting, modest pins/badges, practical leather shoes.\nBackground: Soviet city landscape.',
+      content: 'Keep the person\'s identity, face geometry, pose, expression, and exact camera framing from the uploaded photo.\nDo not change angle, scale, crop, or depth of field.\n\nChange only clothing, lighting, and environment:\n- Outfit: 1970s USSR functional style. Simple utilitarian wardrobe: plain shirt, modest tailored jacket or worker\'s coat, optional structured overcoat (cold weather), small pins/badges, practical leather shoes.\n- Background: Soviet city street or square, authentic 1970s atmosphere.\n- Lighting: slightly muted, natural daylight typical of Soviet urban scenes in 1970s.\n\nFinal image must look like a realistic Soviet-era photograph, with consistent style and textures.',
       category: 'era_style',
       variables: JSON.stringify({}),
       is_active: true,
