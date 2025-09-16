@@ -6,6 +6,7 @@ import { PhotoStylizationService } from '../services/PhotoStylizationService';
 import { EraStyleService } from '../services/EraStyleService';
 import { PoetStyleService } from '../services/PoetStyleService';
 import { ImageGenerationService } from '../services/ImageGenerationService';
+import { TelegramBotService } from '../services/TelegramBotService';
 
 const router = express.Router();
 
@@ -198,7 +199,7 @@ router.post('/stuck-tasks/:id/restart', requireAdmin, async (req: Request, res: 
           telegramId: telegramId,
           imageUrl: requestData.imageUrl,
           eraId: requestData.eraId,
-          prompt: requestData.prompt,
+          prompt: requestData.prompt || stuckTask.prompt || '',
           originalFilename: requestData.originalFilename,
           adminRetry
         });
@@ -211,7 +212,7 @@ router.post('/stuck-tasks/:id/restart', requireAdmin, async (req: Request, res: 
           imageUrl: requestData.imageUrl,
           localPath: requestData.localPath,
           poetId: requestData.poetId,
-          prompt: requestData.prompt,
+          prompt: requestData.prompt || stuckTask.prompt || '',
           originalFilename: requestData.originalFilename,
           adminRetry
         });
@@ -221,7 +222,7 @@ router.post('/stuck-tasks/:id/restart', requireAdmin, async (req: Request, res: 
         result = await ImageGenerationService.generateImage({
           userId: stuckTask.user_id,
           telegramId: telegramId,
-          prompt: requestData.prompt,
+          prompt: requestData.prompt || stuckTask.prompt || '',
           moduleName: requestData.moduleName,
           options: requestData.options || {},
           adminRetry
@@ -232,26 +233,62 @@ router.post('/stuck-tasks/:id/restart', requireAdmin, async (req: Request, res: 
         throw new Error(`Неподдерживаемый тип запроса: ${stuckTask.request_type}`);
     }
 
-    // Создаем новый API запрос для перезапущенной задачи
-    const newApiRequest = await ApiRequest.create({
-      user_id: stuckTask.user_id,
-      photo_id: stuckTask.photo_id,
-      api_name: stuckTask.api_name,
-      request_type: stuckTask.request_type,
-      request_data: stuckTask.request_data,
-      prompt: stuckTask.prompt,
-      status: 'completed',
-      cost: stuckTask.cost,
+    // Обновляем существующий API запрос с результатом
+    await stuckTask.update({
+      status: result.success ? 'completed' : 'failed',
       response_data: JSON.stringify(result),
-      completed_date: new Date()
+      completed_date: new Date(),
+      error_message: result.success ? undefined : `Перегенерировано: ${result.error || 'Неизвестная ошибка'}`
     });
+
+    // Отправляем уведомление пользователю в Telegram только при успешном выполнении
+    if (result.success) {
+      try {
+        const user = await User.findByPk(stuckTask.user_id);
+        if (user?.telegram_id) {
+          let resultUrl = '';
+          
+          // Извлекаем URL результата в зависимости от типа задачи
+          switch (stuckTask.request_type) {
+            case 'photo_restore':
+              resultUrl = (result as any).restoredUrl;
+              break;
+            case 'photo_stylize':
+              resultUrl = (result as any).styledUrl;
+              break;
+            case 'era_style':
+              resultUrl = (result as any).styledUrl;
+              break;
+            case 'poet_style':
+              resultUrl = (result as any).processed_image_url;
+              break;
+            case 'image_generate':
+              resultUrl = (result as any).processed_image_url;
+              break;
+          }
+
+          await TelegramBotService.sendTaskCompletionNotification(
+            user.telegram_id,
+            stuckTask.request_type,
+            resultUrl,
+            true // всегда true, так как мы здесь только при успехе
+          );
+          
+          console.log(`📤 [ADMIN] Уведомление отправлено пользователю ${user.telegram_id} о перезапуске зависшей задачи ${stuckTask.id}`);
+        }
+      } catch (notificationError) {
+        console.error('❌ [ADMIN] Ошибка при отправке уведомления:', notificationError);
+        // Не прерываем выполнение, если уведомление не отправилось
+      }
+    } else {
+      console.log(`❌ [ADMIN] Зависшая задача ${stuckTask.id} завершилась с ошибкой, уведомление не отправляется`);
+    }
 
     res.json({
       success: true,
       message: 'Зависшая задача перезапущена успешно',
       data: {
-        oldTaskId: stuckTask.id,
-        newTaskId: newApiRequest.id,
+        taskId: stuckTask.id,
         result
       }
     });
@@ -331,7 +368,7 @@ router.post('/api-requests/:id/retry', requireAdmin, async (req: Request, res: R
             telegramId: telegramId,
             imageUrl: requestData.imageUrl,
             eraId: requestData.eraId,
-            prompt: requestData.prompt,
+            prompt: requestData.prompt || apiRequest.prompt || '',
             originalFilename: requestData.originalFilename,
             adminRetry
           });
@@ -344,7 +381,7 @@ router.post('/api-requests/:id/retry', requireAdmin, async (req: Request, res: R
             imageUrl: requestData.imageUrl,
             localPath: requestData.localPath,
             poetId: requestData.poetId,
-            prompt: requestData.prompt,
+            prompt: requestData.prompt || apiRequest.prompt || '',
             originalFilename: requestData.originalFilename,
             adminRetry
           });
@@ -354,7 +391,7 @@ router.post('/api-requests/:id/retry', requireAdmin, async (req: Request, res: R
           result = await ImageGenerationService.generateImage({
             userId: apiRequest.user_id,
             telegramId: telegramId,
-            prompt: requestData.prompt,
+            prompt: requestData.prompt || apiRequest.prompt || '',
             moduleName: requestData.moduleName,
             options: requestData.options || {},
             adminRetry
@@ -371,6 +408,49 @@ router.post('/api-requests/:id/retry', requireAdmin, async (req: Request, res: R
         response_data: JSON.stringify(result),
         completed_date: new Date()
       });
+
+      // Отправляем уведомление пользователю в Telegram только при успешном выполнении
+      if (result.success) {
+        try {
+          const user = await User.findByPk(apiRequest.user_id);
+          if (user?.telegram_id) {
+            let resultUrl = '';
+            
+            // Извлекаем URL результата в зависимости от типа задачи
+            switch (apiRequest.request_type) {
+              case 'photo_restore':
+                resultUrl = (result as any).restoredUrl;
+                break;
+              case 'photo_stylize':
+                resultUrl = (result as any).styledUrl;
+                break;
+              case 'era_style':
+                resultUrl = (result as any).styledUrl;
+                break;
+              case 'poet_style':
+                resultUrl = (result as any).processed_image_url;
+                break;
+              case 'image_generate':
+                resultUrl = (result as any).processed_image_url;
+                break;
+            }
+
+            await TelegramBotService.sendTaskCompletionNotification(
+              user.telegram_id,
+              apiRequest.request_type,
+              resultUrl,
+              true // всегда true, так как мы здесь только при успехе
+            );
+            
+            console.log(`📤 [ADMIN] Уведомление отправлено пользователю ${user.telegram_id} о перезапуске задачи ${apiRequest.id}`);
+          }
+        } catch (notificationError) {
+          console.error('❌ [ADMIN] Ошибка при отправке уведомления:', notificationError);
+          // Не прерываем выполнение, если уведомление не отправилось
+        }
+      } else {
+        console.log(`❌ [ADMIN] Задача ${apiRequest.id} завершилась с ошибкой, уведомление не отправляется`);
+      }
 
       res.json({
         success: true,
@@ -589,6 +669,46 @@ router.post('/stuck-tasks/restart-all', requireAdmin, async (req: Request, res: 
 
   } catch (error) {
     console.error('❌ [ADMIN] Ошибка при перезапуске зависших задач:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Внутренняя ошибка сервера'
+    });
+  }
+});
+
+/**
+ * Отправить тестовое уведомление в Telegram
+ */
+router.post('/test-notification', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const { telegramId, message } = req.body;
+    
+    if (!telegramId || !message) {
+      return res.status(400).json({
+        success: false,
+        error: 'Необходимо указать telegramId и message'
+      });
+    }
+
+    const success = await TelegramBotService.sendMessage(
+      telegramId,
+      `🧪 <b>Тестовое уведомление</b>\n\n${message}\n\nЭто сообщение отправлено из админ-панели.`
+    );
+
+    if (success) {
+      res.json({
+        success: true,
+        message: 'Тестовое уведомление отправлено успешно'
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: 'Не удалось отправить уведомление'
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ [ADMIN] Ошибка при отправке тестового уведомления:', error);
     res.status(500).json({
       success: false,
       error: 'Внутренняя ошибка сервера'

@@ -284,18 +284,14 @@ export class EraStyleService {
       console.log('🎨 [ERA_STYLE] prompt длина:', prompt.length);
       console.log('🎨 [ERA_STYLE] prompt содержание:', prompt.substring(0, 150) + '...');
 
-      // Читаем изображение
-      const imagePath = path.resolve(imageUrl);
-      console.log('📁 [ERA_STYLE] Читаем изображение:', imagePath);
-
-      if (!fs.existsSync(imagePath)) {
+      // Получаем изображение (URL или локальный файл)
+      const imageBuffer = await this.getImageBuffer(imageUrl);
+      if (!imageBuffer) {
         return {
           success: false,
-          error: 'Исходный файл не найден'
+          error: 'Не удалось загрузить изображение'
         };
       }
-
-      const imageBuffer = fs.readFileSync(imagePath);
       console.log('📊 [ERA_STYLE] Размер изображения:', imageBuffer.length, 'байт');
 
       // Получаем метаданные изображения
@@ -523,5 +519,37 @@ export class EraStyleService {
     // Если стилизованное изображение не получено, это ошибка API
     console.log('❌ [GEMINI] Стилизованное изображение не получено от API');
     throw new Error('API не вернул стилизованное изображение');
+  }
+
+  /**
+   * Получает изображение как Buffer (из URL или локального файла)
+   */
+  private static async getImageBuffer(imageUrl: string): Promise<Buffer | null> {
+    try {
+      if (imageUrl.startsWith('http')) {
+        console.log('📸 [ERA_STYLE] Скачиваем файл по URL:', imageUrl);
+        const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+        const buffer = Buffer.from(response.data as ArrayBuffer);
+        console.log('✅ [ERA_STYLE] Файл успешно скачан, размер:', buffer.length, 'байт');
+        return buffer;
+      } else {
+        // Локальный файл
+        console.log('📸 [ERA_STYLE] Читаем локальный файл:', imageUrl);
+        const filePath = path.resolve(process.cwd(), imageUrl);
+        console.log('📸 [ERA_STYLE] Полный путь к файлу:', filePath);
+        
+        if (fs.existsSync(filePath)) {
+          const buffer = fs.readFileSync(filePath);
+          console.log('✅ [ERA_STYLE] Файл успешно прочитан, размер:', buffer.length, 'байт');
+          return buffer;
+        } else {
+          console.error('❌ [ERA_STYLE] Файл не найден:', filePath);
+          return null;
+        }
+      }
+    } catch (error) {
+      console.error('❌ [ERA_STYLE] Ошибка при получении изображения:', error);
+      return null;
+    }
   }
 }

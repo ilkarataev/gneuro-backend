@@ -269,6 +269,120 @@ export class TelegramBotService {
   }
 
   /**
+   * Отправляет сообщение пользователю в Telegram
+   * @param chatId - ID чата пользователя
+   * @param text - текст сообщения
+   * @param photoUrl - URL изображения (опционально)
+   * @param caption - подпись к изображению (опционально)
+   * @returns true если сообщение отправлено успешно
+   */
+  static async sendMessage(
+    chatId: number,
+    text: string,
+    photoUrl?: string,
+    caption?: string
+  ): Promise<boolean> {
+    try {
+      TelegramBotService.checkBotToken();
+
+      console.log('📤 [TelegramBot] Отправляем сообщение пользователю');
+      console.log('📤 [TelegramBot] Chat ID:', chatId);
+      console.log('📤 [TelegramBot] Текст:', text);
+      console.log('📤 [TelegramBot] Фото URL:', photoUrl);
+
+      let payload: any;
+      let endpoint: string;
+
+      if (photoUrl) {
+        // Отправляем фото с подписью
+        endpoint = `${TelegramBotService.BASE_URL}/sendPhoto`;
+        payload = {
+          chat_id: chatId,
+          photo: photoUrl,
+          caption: caption || text,
+          parse_mode: 'HTML'
+        };
+      } else {
+        // Отправляем только текст
+        endpoint = `${TelegramBotService.BASE_URL}/sendMessage`;
+        payload = {
+          chat_id: chatId,
+          text: text,
+          parse_mode: 'HTML'
+        };
+      }
+
+      const responseData = await TelegramBotService.makeRequestWithRetry<TelegramBotResponse>(
+        endpoint,
+        payload,
+        TelegramBotService.MAX_RETRIES,
+        TelegramBotService.TELEGRAM_API_TIMEOUT
+      );
+
+      if (responseData?.ok) {
+        console.log('✅ [TelegramBot] Сообщение отправлено успешно');
+        return true;
+      } else {
+        console.error('❌ [TelegramBot] Ошибка отправки сообщения:', responseData);
+        return false;
+      }
+
+    } catch (error: any) {
+      console.error('❌ [TelegramBot] Ошибка при отправке сообщения:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Отправляет уведомление о завершении задачи пользователю
+   * @param telegramId - ID пользователя в Telegram
+   * @param taskType - тип задачи (photo_restore, photo_stylize, era_style, poet_style, image_generate)
+   * @param resultUrl - URL результата
+   * @param isSuccess - успешно ли выполнена задача
+   * @param errorMessage - сообщение об ошибке (если есть)
+   */
+  static async sendTaskCompletionNotification(
+    telegramId: number,
+    taskType: string,
+    resultUrl?: string,
+    isSuccess: boolean = true,
+    errorMessage?: string
+  ): Promise<boolean> {
+    try {
+      const taskNames: { [key: string]: string } = {
+        'photo_restore': 'Реставрация фото',
+        'photo_stylize': 'Стилизация фото',
+        'era_style': 'Стиль эпохи',
+        'poet_style': 'Стиль с поэтом',
+        'image_generate': 'Генерация изображения'
+      };
+
+      const taskName = taskNames[taskType] || taskType;
+
+      if (isSuccess && resultUrl) {
+        // Успешное завершение с результатом
+        const message = `✅ <b>${taskName} завершена!</b>\n\nВаш результат готов. Нажмите на изображение ниже, чтобы посмотреть:`;
+        
+        return await TelegramBotService.sendMessage(
+          telegramId,
+          message,
+          resultUrl,
+          `🎨 ${taskName} - результат готов!`
+        );
+      } else {
+        // Ошибка или неуспешное завершение
+        const message = `❌ <b>Ошибка при выполнении ${taskName}</b>\n\n${errorMessage || 'Произошла неизвестная ошибка. Попробуйте еще раз.'}`;
+        
+        return await TelegramBotService.sendMessage(telegramId, message);
+      }
+
+    } catch (error: any) {
+      console.error('❌ [TelegramBot] Ошибка при отправке уведомления о завершении задачи:', error);
+      return false;
+    }
+  }
+
+  /**
    * Создает URL для изображения с учетом особенностей Telegram
    * @param baseUrl - базовый URL сервера
    * @param telegramId - ID пользователя
