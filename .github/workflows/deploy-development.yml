@@ -19,30 +19,15 @@ jobs:
           fetch-depth: 0
 
       - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.STAND_SSH_PRIVATE_KEY }}
+          ssh-passphrase: ${{ secrets.STAND_SSH_PRIVATE_KEY_PASSWORD }}
+
+      - name: Add server to known hosts
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.STAND_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          
-          # Create a temporary askpass script
-          cat > ~/.ssh/askpass.sh << 'EOF'
-          #!/bin/bash
-          echo "$SSH_PASSPHRASE"
-          EOF
-          chmod +x ~/.ssh/askpass.sh
-          
-          # Setup SSH agent and add key with passphrase
-          eval "$(ssh-agent -s)"
-          export SSH_PASSPHRASE="${{ secrets.STAND_SSH_PRIVATE_KEY_PASSWORD }}"
-          export SSH_ASKPASS="$HOME/.ssh/askpass.sh"
-          export DISPLAY=dummy
-          ssh-add ~/.ssh/id_rsa < /dev/null
-          
-          # Add server to known hosts
           ssh-keyscan -H ${{ vars.STAND_SERVER_HOST }} >> ~/.ssh/known_hosts
-          
-          # Cleanup
-          rm -f ~/.ssh/askpass.sh
 
       - name: Deploy to Development Server
         run: |
@@ -76,12 +61,12 @@ jobs:
           
           # Sync project files
           echo "� Syncing project files..."
+
           rsync -avz -e 'ssh -o StrictHostKeyChecking=no' docker* src services *.json images ${USER}@${REMOTE}:${DESTINATION_PATH}/
           
           # Deploy with docker-compose
           echo "� Starting docker-compose..."
           ssh -o StrictHostKeyChecking=no ${USER}@${REMOTE} "cd ${DESTINATION_PATH} && docker compose -f ${DOCKER_COMPOSE_FILE} up -d --build"
-
           echo "✅ Development deployment completed successfully!"
 
       - name: Get commit info
