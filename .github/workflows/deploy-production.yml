@@ -1,17 +1,11 @@
 name: Deploy to Production
 
 on:
-  push:
-    tags:
-      - 'v*'
-    branches:
-      - main
-      - master
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to deploy (optional, will use latest if empty)'
-        required: false
+        description: 'Git tag to deploy'
+        required: true
         type: string
 
 jobs:
@@ -40,12 +34,19 @@ jobs:
             echo "deploy_type=branch_push" >> $GITHUB_OUTPUT
           fi
 
-      - name: Use SSH agent
+      - name: Verify tag exists
+        run: |
+          if ! git tag -l | grep -q "^${{ github.event.inputs.tag }}$"; then
+            echo "❌ Tag ${{ github.event.inputs.tag }} does not exist"
+            exit 1
+          fi
+          echo "✅ Tag ${{ github.event.inputs.tag }} found"
+
+      - name: Setup SSH
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
-
-      - name: Add host to known_hosts
+      - name: Add server to known hosts
         run: |
           mkdir -p ~/.ssh
           ssh-keyscan -H ${{ vars.PROD_SERVER_HOST }} >> ~/.ssh/known_hosts
@@ -86,7 +87,7 @@ jobs:
 
           # Проектные файлы
           echo "📦 Syncing project files..."
-          rsync -avz -e 'ssh -o StrictHostKeyChecking=no ' docker* src services *.json ${USER}@${REMOTE}:${DESTINATION_PATH}/
+          rsync -avz -e 'ssh -o StrictHostKeyChecking=no ' docker* src services *.json images ${USER}@${REMOTE}:${DESTINATION_PATH}/
 
           # Создаем бэкап текущего состояния
           echo "💾 Creating backup..."
@@ -119,6 +120,10 @@ jobs:
           echo "- **Commit:** ${{ steps.commit.outputs.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Author:** ${{ steps.commit.outputs.author }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Message:** ${{ steps.commit.outputs.message }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Deployment Summary
+        run: |
+          echo "## 🚀 Production Deployment Summary" >> $GITHUB_STEP_SUMMARY
           echo "- **Environment:** Production" >> $GITHUB_STEP_SUMMARY
           echo "- **Server:** ${{ vars.PROD_SERVER_HOST }}" >> $GITHUB_STEP_SUMMARY
           echo "- **User:** ${{ vars.PROD_SERVER_USER }}" >> $GITHUB_STEP_SUMMARY
