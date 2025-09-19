@@ -65,11 +65,19 @@ router.get('/api-requests', requireAdmin, async (req: Request, res: Response) =>
       order: [['createdAt', 'DESC']],
       limit: Number(limit),
       offset,
-      include: [{
-        model: Photo,
-        as: 'photo',
-        required: false
-      }]
+      include: [
+        {
+          model: Photo,
+          as: 'photo',
+          required: false
+        },
+        {
+          model: User,
+          as: 'user',
+          required: false,
+          attributes: ['id', 'telegram_id', 'username', 'first_name', 'last_name']
+        }
+      ]
     });
 
     res.json({
@@ -101,11 +109,19 @@ router.get('/api-requests/:id', requireAdmin, async (req: Request, res: Response
     const { id } = req.params;
     
     const apiRequest = await ApiRequest.findByPk(id, {
-      include: [{
-        model: Photo,
-        as: 'photo',
-        required: false
-      }]
+      include: [
+        {
+          model: Photo,
+          as: 'photo',
+          required: false
+        },
+        {
+          model: User,
+          as: 'user',
+          required: false,
+          attributes: ['id', 'telegram_id', 'username', 'first_name', 'last_name']
+        }
+      ]
     });
 
     if (!apiRequest) {
@@ -241,7 +257,7 @@ router.post('/stuck-tasks/:id/restart', requireAdmin, async (req: Request, res: 
       error_message: result.success ? undefined : `Перегенерировано: ${result.error || 'Неизвестная ошибка'}`
     });
 
-    // Отправляем уведомление пользователю в Telegram только при успешном выполнении
+    // Отправляем уведомление пользователю в Telegram только при успешном выполнении И наличии изображения
     if (result.success) {
       try {
         const user = await User.findByPk(stuckTask.user_id);
@@ -267,14 +283,24 @@ router.post('/stuck-tasks/:id/restart', requireAdmin, async (req: Request, res: 
               break;
           }
 
-          await TelegramBotService.sendTaskCompletionNotification(
-            user.telegram_id,
-            stuckTask.request_type,
-            resultUrl,
-            true // всегда true, так как мы здесь только при успехе
-          );
-          
-          console.log(`📤 [ADMIN] Уведомление отправлено пользователю ${user.telegram_id} о перезапуске зависшей задачи ${stuckTask.id}`);
+          // Проверяем, что URL изображения валидный
+          if (resultUrl && (resultUrl.startsWith('http') || resultUrl.startsWith('/'))) {
+            await TelegramBotService.sendTaskCompletionNotification(
+              user.telegram_id,
+              stuckTask.request_type,
+              resultUrl,
+              true // всегда true, так как мы здесь только при успехе
+            );
+            
+            console.log(`📤 [ADMIN] Уведомление отправлено пользователю ${user.telegram_id} о перезапуске зависшей задачи ${stuckTask.id}`);
+          } else {
+            console.log(`⚠️ [ADMIN] Зависшая задача ${stuckTask.id} завершилась успешно, но URL изображения невалидный: ${resultUrl}`);
+            // Если нет валидного URL, помечаем как failed
+            await stuckTask.update({
+              status: 'failed',
+              error_message: `Перезапуск зависшей задачи: Генерация завершилась без валидного URL изображения. URL: ${resultUrl || 'не указан'}`
+            });
+          }
         }
       } catch (notificationError) {
         console.error('❌ [ADMIN] Ошибка при отправке уведомления:', notificationError);
@@ -285,8 +311,8 @@ router.post('/stuck-tasks/:id/restart', requireAdmin, async (req: Request, res: 
     }
 
     res.json({
-      success: true,
-      message: 'Зависшая задача перезапущена успешно',
+      success: result.success,
+      message: result.success ? 'Зависшая задача перезапущена успешно' : 'Зависшая задача перезапущена с ошибкой',
       data: {
         taskId: stuckTask.id,
         result
@@ -402,14 +428,15 @@ router.post('/api-requests/:id/retry', requireAdmin, async (req: Request, res: R
           throw new Error(`Неподдерживаемый тип запроса: ${apiRequest.request_type}`);
       }
 
-      // Обновляем статус на completed
+      // Обновляем статус в зависимости от результата
       await apiRequest.update({
-        status: 'completed',
+        status: result.success ? 'completed' : 'failed',
         response_data: JSON.stringify(result),
-        completed_date: new Date()
+        completed_date: new Date(),
+        error_message: result.success ? undefined : `Админский перезапуск: ${result.error || 'Неизвестная ошибка'}`
       });
 
-      // Отправляем уведомление пользователю в Telegram только при успешном выполнении
+      // Отправляем уведомление пользователю в Telegram только при успешном выполнении И наличии изображения
       if (result.success) {
         try {
           const user = await User.findByPk(apiRequest.user_id);
@@ -435,14 +462,24 @@ router.post('/api-requests/:id/retry', requireAdmin, async (req: Request, res: R
                 break;
             }
 
-            await TelegramBotService.sendTaskCompletionNotification(
-              user.telegram_id,
-              apiRequest.request_type,
-              resultUrl,
-              true // всегда true, так как мы здесь только при успехе
-            );
-            
-            console.log(`📤 [ADMIN] Уведомление отправлено пользователю ${user.telegram_id} о перезапуске задачи ${apiRequest.id}`);
+            // Проверяем, что URL изображения валидный
+            if (resultUrl && (resultUrl.startsWith('http') || resultUrl.startsWith('/'))) {
+              await TelegramBotService.sendTaskCompletionNotification(
+                user.telegram_id,
+                apiRequest.request_type,
+                resultUrl,
+                true // всегда true, так как мы здесь только при успехе
+              );
+              
+              console.log(`📤 [ADMIN] Уведомление отправлено пользователю ${user.telegram_id} о перезапуске задачи ${apiRequest.id}`);
+            } else {
+              console.log(`⚠️ [ADMIN] Задача ${apiRequest.id} завершилась успешно, но URL изображения невалидный: ${resultUrl}`);
+              // Если нет валидного URL, помечаем как failed
+              await apiRequest.update({
+                status: 'failed',
+                error_message: `Админский перезапуск: Генерация завершилась без валидного URL изображения. URL: ${resultUrl || 'не указан'}`
+              });
+            }
           }
         } catch (notificationError) {
           console.error('❌ [ADMIN] Ошибка при отправке уведомления:', notificationError);
@@ -453,8 +490,8 @@ router.post('/api-requests/:id/retry', requireAdmin, async (req: Request, res: R
       }
 
       res.json({
-        success: true,
-        message: 'Обработка перезапущена успешно',
+        success: result.success,
+        message: result.success ? 'Обработка перезапущена успешно' : 'Обработка перезапущена с ошибкой',
         result
       });
 
@@ -497,11 +534,19 @@ router.get('/stuck-tasks', requireAdmin, async (req: Request, res: Response) => 
         }
       },
       order: [['updatedAt', 'ASC']],
-      include: [{
-        model: Photo,
-        as: 'photo',
-        required: false
-      }]
+      include: [
+        {
+          model: Photo,
+          as: 'photo',
+          required: false
+        },
+        {
+          model: User,
+          as: 'user',
+          required: false,
+          attributes: ['id', 'telegram_id', 'username', 'first_name', 'last_name']
+        }
+      ]
     });
 
     res.json({

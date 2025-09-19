@@ -144,8 +144,12 @@ export class TelegramBotService {
       console.log('📤 [TelegramBot] Подпись:', caption);
       console.log('📤 [TelegramBot] userId:', userId);
 
+      // Преобразуем URL в полный HTTPS URL для Telegram
+      const fullPhotoUrl = TelegramBotService.convertToFullUrl(photoUrl);
+      console.log('🔗 [TelegramBot] Полный URL для подготовленного сообщения:', fullPhotoUrl);
+
       // Проверяем доступность изображения перед отправкой в Telegram API
-      const imageAvailable = await TelegramBotService.checkImageAvailability(photoUrl);
+      const imageAvailable = await TelegramBotService.checkImageAvailability(fullPhotoUrl);
       if (!imageAvailable) {
         console.warn('⚠️ [TelegramBot] Изображение недоступно, но продолжаем создание сообщения...');
         // Не блокируем создание сообщения, так как изображение может стать доступным позже
@@ -158,8 +162,8 @@ export class TelegramBotService {
         result: {
           type: 'photo',
           id: `photo_${Date.now()}`, // уникальный ID для результата
-          photo_url: photoUrl,
-          thumb_url: photoUrl, // используем тот же URL как thumbnail
+          photo_url: fullPhotoUrl,
+          thumb_url: fullPhotoUrl, // используем тот же URL как thumbnail
           ...(caption && { caption })
         },
         allow_user_chats: true,
@@ -269,6 +273,30 @@ export class TelegramBotService {
   }
 
   /**
+   * Преобразует относительный URL в полный HTTPS URL
+   * @param url - URL для преобразования
+   * @returns полный HTTPS URL
+   */
+  private static convertToFullUrl(url: string): string {
+    // Если URL уже полный, возвращаем как есть
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return url;
+    }
+    
+    // Если URL относительный, преобразуем в полный
+    if (url.startsWith('/')) {
+      const baseUrl = process.env.BASE_URL || 'https://suno.ilkarvet.ru';
+      const cleanBaseUrl = baseUrl.replace(/\/api$/, ''); // Убираем /api если есть
+      return `${cleanBaseUrl}${url}`;
+    }
+    
+    // Если URL не начинается с /, добавляем /api/uploads/
+    const baseUrl = process.env.BASE_URL || 'https://suno.ilkarvet.ru';
+    const cleanBaseUrl = baseUrl.replace(/\/api$/, '');
+    return `${cleanBaseUrl}/api/uploads/${url}`;
+  }
+
+  /**
    * Отправляет сообщение пользователю в Telegram
    * @param chatId - ID чата пользователя
    * @param text - текст сообщения
@@ -294,11 +322,15 @@ export class TelegramBotService {
       let endpoint: string;
 
       if (photoUrl) {
+        // Преобразуем URL в полный HTTPS URL для Telegram
+        const fullPhotoUrl = TelegramBotService.convertToFullUrl(photoUrl);
+        console.log('🔗 [TelegramBot] Полный URL для Telegram:', fullPhotoUrl);
+        
         // Отправляем фото с подписью
         endpoint = `${TelegramBotService.BASE_URL}/sendPhoto`;
         payload = {
           chat_id: chatId,
-          photo: photoUrl,
+          photo: fullPhotoUrl,
           caption: caption || text,
           parse_mode: 'HTML'
         };
