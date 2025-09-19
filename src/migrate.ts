@@ -7,6 +7,7 @@ import { up as seedPoetsData } from './migrations/20250115_seed_poets_data';
 import { up as seedPoetStylePrompts } from './migrations/20250115_seed_poet_style_prompts';
 import { up as addPoetStylePrice } from './migrations/20250115_add_poet_style_price';
 import { up as updatePoetSelfiePrompt } from './migrations/20250916_update_poet_selfie_prompt';
+import { up as addBackgroundRetryStatus } from './migrations/20250119_add_background_retry_status';
 
 
 async function runMigrations() {
@@ -99,6 +100,16 @@ async function runMigrations() {
       console.log('Промпт для селфи с поэтами обновлен!');
     } catch (error: any) {
       console.error('Ошибка при обновлении промпта для селфи с поэтами:', error);
+      throw error;
+    }
+
+    // Добавляем новый статус pending_background_retry
+    console.log('Начало добавления статуса pending_background_retry...');
+    try {
+      await addBackgroundRetryStatus(sequelize.getQueryInterface());
+      console.log('Статус pending_background_retry добавлен!');
+    } catch (error: any) {
+      console.error('Ошибка при добавлении статуса pending_background_retry:', error);
       throw error;
     }
     

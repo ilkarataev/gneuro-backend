@@ -75,7 +75,7 @@ interface ApiRequestAttributes {
   request_data?: string;
   response_data?: string;
   prompt?: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'pending_background_retry';
   cost: number;
   external_task_id?: string;
   request_date: Date;
@@ -193,7 +193,7 @@ class ApiRequest extends Model<ApiRequestAttributes, ApiRequestCreationAttribute
   public request_data?: string;
   public response_data?: string;
   public prompt?: string;
-  public status!: 'pending' | 'processing' | 'completed' | 'failed';
+  public status!: 'pending' | 'processing' | 'completed' | 'failed' | 'pending_background_retry';
   public cost!: number;
   public external_task_id?: string;
   public request_date!: Date;
@@ -459,7 +459,7 @@ ApiRequest.init({
     allowNull: true,
   },
   status: {
-    type: DataTypes.ENUM('pending', 'processing', 'completed', 'failed'),
+    type: DataTypes.ENUM('pending', 'processing', 'completed', 'failed', 'pending_background_retry'),
     defaultValue: 'pending'
   },
   cost: { 

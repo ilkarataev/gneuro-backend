@@ -823,4 +823,52 @@ router.get('/stats', requireAdmin, async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * Получить статистику фонового процессора
+ */
+router.get('/background-stats', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const { BackgroundTaskProcessor } = await import('../services/BackgroundTaskProcessor');
+    const stats = BackgroundTaskProcessor.getStats();
+    
+    // Получаем статистику задач из БД
+    const pendingTasks = await ApiRequest.count({
+      where: { status: 'pending_background_retry' }
+    });
+    
+    const processingTasks = await ApiRequest.count({
+      where: { status: 'processing' }
+    });
+    
+    const failedTasks = await ApiRequest.count({
+      where: { 
+        status: 'failed',
+        error_message: {
+          [Op.like]: '%фоновая обработка%'
+        }
+      }
+    });
+
+    res.json({
+      success: true,
+      message: 'Статистика фонового процессора получена',
+      data: {
+        processor: stats,
+        tasks: {
+          pendingBackgroundRetry: pendingTasks,
+          processing: processingTasks,
+          failed: failedTasks
+        }
+      }
+    });
+  } catch (error) {
+    console.error('❌ [ADMIN] Ошибка получения статистики фонового процессора:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Ошибка получения статистики фонового процессора',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
 export default router;

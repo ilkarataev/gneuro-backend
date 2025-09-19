@@ -32,11 +32,11 @@ export interface StylizePhotoResult {
 export class PhotoStylizationService {
   private static readonly GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'test_key';
   
-  // Настройки для retry механизма
-  private static readonly MAX_RETRY_DURATION = parseInt(process.env.GEMINI_MAX_RETRY_DURATION || '300000'); // 5 минут по умолчанию
-  private static readonly INITIAL_RETRY_DELAY = parseInt(process.env.GEMINI_INITIAL_RETRY_DELAY || '1000'); // 1 секунда по умолчанию
-  private static readonly MAX_RETRY_DELAY = parseInt(process.env.GEMINI_MAX_RETRY_DELAY || '30000'); // 30 секунд по умолчанию
-  private static readonly BACKOFF_MULTIPLIER = parseFloat(process.env.GEMINI_BACKOFF_MULTIPLIER || '2'); // Множитель для экспоненциального роста
+  // Настройки для retry механизма - быстрые попытки для основного сервиса
+  private static readonly MAX_RETRY_DURATION = parseInt(process.env.GEMINI_MAX_RETRY_DURATION || '180000'); // 3 минуты по умолчанию (оптимально для UX)
+  private static readonly INITIAL_RETRY_DELAY = parseInt(process.env.GEMINI_INITIAL_RETRY_DELAY || '2000'); // 2 секунды
+  private static readonly MAX_RETRY_DELAY = parseInt(process.env.GEMINI_MAX_RETRY_DELAY || '30000'); // 30 секунд максимум
+  private static readonly BACKOFF_MULTIPLIER = parseFloat(process.env.GEMINI_BACKOFF_MULTIPLIER || '1.8'); // Быстрый рост задержки
 
   /**
    * Получить текущую стоимость стилизации
@@ -268,17 +268,48 @@ export class PhotoStylizationService {
       } catch (processingError) {
         console.error('❌ [STYLIZE] Ошибка при обработке изображения:', processingError);
         
-        // Обновляем статус запроса на failed
-        await apiRequest.update({
-          status: 'failed',
-          error_message: processingError instanceof Error ? processingError.message : 'Unknown error',
-          completed_date: new Date()
-        });
+        // Проверяем, является ли ошибка временной (подлежит retry)
+        const isRetryable = this.isRetryableError(processingError instanceof Error ? processingError : new Error(String(processingError)));
+        
+        if (isRetryable) {
+          // Если ошибка временная, помечаем для фоновой обработки
+          console.log('🔄 [STYLIZE] Ошибка временная, задача будет обработана в фоне');
+          
+          await apiRequest.update({
+            status: 'pending_background_retry',
+            error_message: `Временная ошибка: ${processingError instanceof Error ? processingError.message : 'Unknown error'}. Задача будет обработана в фоне.`,
+            completed_date: new Date()
+          });
 
-        return {
-          success: false,
-          error: 'Сервис временно недоступен, попробуйте чуть позже'
-        };
+          // Отправляем уведомление пользователю о фоновой обработке
+          try {
+            const { TelegramBotService } = await import('./TelegramBotService');
+            await TelegramBotService.sendMessage(
+              request.telegramId,
+              '🔄 <b>Ваше фото обрабатывается</b>\n\nИз-за временных проблем с сервисом обработка займет больше времени. Мы отправим результат прямо в этот чат, как только обработка завершится!'
+            );
+            console.log('📤 [STYLIZE] Отправлено уведомление о фоновой обработке пользователю', request.telegramId);
+          } catch (notificationError) {
+            console.error('❌ [STYLIZE] Ошибка отправки уведомления:', notificationError);
+          }
+
+          return {
+            success: false,
+            error: 'Из-за временных проблем обработка займет больше времени. Результат будет отправлен в Telegram!'
+          };
+        } else {
+          // Если ошибка критическая, помечаем как failed
+          await apiRequest.update({
+            status: 'failed',
+            error_message: processingError instanceof Error ? processingError.message : 'Unknown error',
+            completed_date: new Date()
+          });
+
+          return {
+            success: false,
+            error: 'Сервис временно недоступен, попробуйте чуть позже'
+          };
+        }
       }
 
     } catch (error) {
