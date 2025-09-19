@@ -87,7 +87,7 @@ jobs:
 
           # Проектные файлы
           echo "📦 Syncing project files..."
-          rsync -avz -e 'ssh -o StrictHostKeyChecking=no ' docker* src services *.json ${USER}@${REMOTE}:${DESTINATION_PATH}/
+          rsync -avz -e 'ssh -o StrictHostKeyChecking=no ' docker* src services *.json images ${USER}@${REMOTE}:${DESTINATION_PATH}/
 
           # Создаем бэкап текущего состояния
           echo "💾 Creating backup..."
