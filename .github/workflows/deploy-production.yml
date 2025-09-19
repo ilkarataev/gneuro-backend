@@ -3,10 +3,11 @@ name: Deploy to Production
 on:
   workflow_dispatch:
     inputs:
-      tag:
-        description: 'Git tag to deploy'
-        required: true
+      branch:
+        description: 'Branch to deploy (default: develop)'
+        required: false
         type: string
+        default: 'develop'
 
 jobs:
   deploy-production:
@@ -17,35 +18,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ github.event.inputs.branch || 'develop' }}
           fetch-depth: 0
 
       - name: Get deployment info
         id: deploy_info
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ github.event.inputs.tag }}" != "" ]]; then
-            echo "deploy_ref=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
-            echo "deploy_type=manual_tag" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            echo "deploy_ref=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-            echo "deploy_type=tag_push" >> $GITHUB_OUTPUT
-          else
-            echo "deploy_ref=${GITHUB_REF#refs/heads/}" >> $GITHUB_OUTPUT
-            echo "deploy_type=branch_push" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Verify tag exists
-        run: |
-          if ! git tag -l | grep -q "^${{ github.event.inputs.tag }}$"; then
-            echo "❌ Tag ${{ github.event.inputs.tag }} does not exist"
-            exit 1
-          fi
-          echo "✅ Tag ${{ github.event.inputs.tag }} found"
+          echo "deploy_ref=${{ github.event.inputs.branch || 'develop' }}" >> $GITHUB_OUTPUT
+          echo "deploy_type=manual_branch" >> $GITHUB_OUTPUT
 
       - name: Setup SSH
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+
       - name: Add server to known hosts
         run: |
           mkdir -p ~/.ssh
