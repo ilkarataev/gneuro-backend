@@ -9,7 +9,7 @@ on:
 jobs:
   deploy-development:
     runs-on: ubuntu-latest
-    environment: development
+    environment: stand
     
     steps:
       - name: Checkout code
@@ -61,16 +61,12 @@ jobs:
           
           # Sync project files
           echo "� Syncing project files..."
-          rsync -avz -e 'ssh -o StrictHostKeyChecking=no' docker* src services *.json ${USER}@${REMOTE}:${DESTINATION_PATH}/
+
+          rsync -avz -e 'ssh -o StrictHostKeyChecking=no' docker* src services *.json images ${USER}@${REMOTE}:${DESTINATION_PATH}/
           
           # Deploy with docker-compose
           echo "� Starting docker-compose..."
           ssh -o StrictHostKeyChecking=no ${USER}@${REMOTE} "cd ${DESTINATION_PATH} && docker compose -f ${DOCKER_COMPOSE_FILE} up -d --build"
-          
-          # Set permissions
-          echo "🔐 Setting permissions..."
-          ssh -o StrictHostKeyChecking=no ${USER}@${REMOTE} "sudo chmod 755 /home /home/${USER} /home/${USER}/${AREA}_${BASE_NAME}"
-          
           echo "✅ Development deployment completed successfully!"
 
       - name: Get commit info

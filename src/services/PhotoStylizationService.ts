@@ -7,6 +7,7 @@ import { Photo, ApiRequest, User } from '../models/index';
 import { BalanceService } from './BalanceService';
 import { PriceService } from './PriceService';
 import { FileManagerService } from './FileManagerService';
+import { PromptService } from './PromptService';
 
 export interface StylizePhotoRequest {
   userId: number;
@@ -16,6 +17,7 @@ export interface StylizePhotoRequest {
   styleId: string;
   prompt: string;
   originalFilename: string;
+  adminRetry?: boolean; // Флаг для отключения списания баланса при админском перезапуске
 }
 
 export interface StylizePhotoResult {
@@ -30,19 +32,11 @@ export interface StylizePhotoResult {
 export class PhotoStylizationService {
   private static readonly GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'test_key';
   
-  // Предустановленные стили с их промптами
-  private static readonly STYLE_PROMPTS = {
-    'passport': 'Transform the uploaded photo into a professional passport-style portrait: neutral expression, direct gaze at camera, plain light gray background, even frontal lighting, high sharpness, no shadows or accessories, standard ID photo format, realistic and formal.',
-    'glamour': 'Transform the uploaded photo into a glamorous fashion magazine cover: professional studio lighting with soft highlights, elegant pose like a high-fashion model, luxurious background with soft bokeh, flawless skin retouching, vibrant colors with magazine-style color grading, timeless style like fashion magazine cover.',
-    'autumn': 'Convert the uploaded photo into an autumn forest photoshoot: person standing among golden and red fall leaves, misty atmosphere, warm sunlight filtering through trees, natural pose with wind-swept hair, realistic outdoor scene, vibrant seasonal colors, high resolution.',
-    'cinema': 'Style the uploaded image as a cinematic movie still: dramatic lighting with lens flare, wide-angle composition like a Hollywood film scene, intense expression, subtle depth of field blur on background, noir or epic vibe, preserve original subject\'s features, 35mm film grain.',
-    'poet': 'Modify the uploaded photo to include a famous poet (like Pushkin or Byron) beside the subject: intimate literary setting in a cozy library or garden, soft natural light, thoughtful poses as if in conversation, realistic historical attire for the poet, warm and inspirational atmosphere, high detail on faces and books.',
-    // Эпохи для изменения стиля
-    'russia_early_20': 'Redesign the uploaded image in the style of early 20th-century Russia: Art Nouveau influences, ornate wooden furniture, samovar on table, lace curtains, soft gas lamp lighting, imperial colors like deep red and gold, realistic historical accuracy, preserve original layout and main elements.',
-    'russia_19': 'Transform the uploaded photo to 19th-century Russian style: neoclassical architecture for rooms, elaborate ball gowns or military uniforms, candlelit ambiance, heavy velvet drapes, earthy tones with accents of emerald, detailed textures like brocade, keep the core subject intact in a romantic era setting.',
-    'soviet': 'Edit the uploaded image into Soviet Union era style (1950s-1980s): functional communist design, wooden bookshelves with propaganda posters, simple upholstered furniture, warm bulb lighting, muted colors like beige and gray with red accents, realistic socialist realism vibe, maintain original composition.',
-    'nineties': 'Style the uploaded photo as 1990s aesthetic: grunge or minimalist vibe, bulky furniture like IKEA-inspired, neon posters or MTV influences, baggy clothes with plaid patterns, fluorescent lighting, vibrant yet faded colors like acid wash denim, high detail on retro textures, preserve the subject\'s pose and key features.'
-  };
+  // Настройки для retry механизма
+  private static readonly MAX_RETRY_DURATION = parseInt(process.env.GEMINI_MAX_RETRY_DURATION || '300000'); // 5 минут по умолчанию
+  private static readonly INITIAL_RETRY_DELAY = parseInt(process.env.GEMINI_INITIAL_RETRY_DELAY || '1000'); // 1 секунда по умолчанию
+  private static readonly MAX_RETRY_DELAY = parseInt(process.env.GEMINI_MAX_RETRY_DELAY || '30000'); // 30 секунд по умолчанию
+  private static readonly BACKOFF_MULTIPLIER = parseFloat(process.env.GEMINI_BACKOFF_MULTIPLIER || '2'); // Множитель для экспоненциального роста
 
   /**
    * Получить текущую стоимость стилизации
@@ -68,15 +62,76 @@ export class PhotoStylizationService {
   /**
    * Получить промпт для выбранного стиля
    */
-  static getStylePrompt(styleId: string): string {
-    return this.STYLE_PROMPTS[styleId as keyof typeof this.STYLE_PROMPTS] || '';
+  static async getStylePrompt(styleId: string): Promise<string> {
+    try {
+      let promptKey: string;
+      
+      // Определяем правильный ключ в зависимости от типа стиля
+      if (styleId.startsWith('era_style_')) {
+        // Для стилей эпох используем ID как есть
+        promptKey = styleId;
+      } else {
+        // Для обычных стилей добавляем префикс
+        promptKey = `photo_style_${styleId}`;
+      }
+      
+      // Получаем промпт из базы
+      const prompt = await PromptService.getPrompt(promptKey);
+      return prompt;
+    } catch (error) {
+      console.error(`❌ [PHOTO_STYLE] Ошибка получения промпта для стиля "${styleId}":`, error);
+      
+      // Резервные промпты на случай проблем с базой (поддерживаем все типы стилей)
+      const fallbackPrompts: Record<string, string> = {
+        // Обычные стили фото
+        'passport': 'Transform the uploaded photo into a professional passport-style portrait: neutral expression, direct gaze at camera, plain light gray background, even frontal lighting, high sharpness, no shadows or accessories, standard ID photo format, realistic and formal.',
+        'glamour': 'Transform the uploaded photo into a glamorous fashion magazine cover: professional studio lighting with soft highlights, elegant pose like a high-fashion model, luxurious background with soft bokeh, flawless skin retouching, vibrant colors with magazine-style color grading, timeless style like fashion magazine cover.',
+        'professional': 'Transform the uploaded photo into a professional corporate headshot: confident and approachable expression, business-appropriate lighting with soft shadows, neutral background like office or studio, sharp focus on face, polished and professional appearance suitable for LinkedIn or company website.',
+        'cartoon': 'Transform the uploaded photo into a cartoon-style illustration: vibrant colors, simplified features, smooth gradients, playful and animated appearance like Pixar or Disney style, maintain recognizable facial features while adding cartoon charm.',
+        
+        // Стили эпох
+        'era_style_russia_early_20th': 'Redesign the uploaded image in the style of early 20th-century Russia: Art Nouveau influences, ornate wooden furniture, samovar on table, lace curtains, soft gas lamp lighting, imperial colors like deep red and gold, realistic historical accuracy, preserve original layout and main elements.',
+        'era_style_russia_19th': 'Transform the uploaded photo to 19th-century Russian style: neoclassical architecture for rooms, elaborate ball gowns or military uniforms, candlelit ambiance, heavy velvet drapes, earthy tones with accents of emerald, detailed textures like brocade, keep the core subject intact in a romantic era setting.',
+        'era_style_soviet_union': 'Edit the uploaded image into Soviet Union era style (1950s-1980s): functional communist design, wooden bookshelves with propaganda posters, simple upholstered furniture, warm bulb lighting, muted colors like beige and gray with red accents, realistic socialist realism vibe, maintain original composition.',
+        'era_style_90s': 'Style the uploaded photo as 1990s aesthetic: grunge or minimalist vibe, bulky furniture like IKEA-inspired, neon posters or MTV influences, baggy clothes with plaid patterns, fluorescent lighting, vibrant yet faded colors like acid wash denim, high detail on retro textures, preserve the subject\'s pose and key features.'
+      };
+      
+      return fallbackPrompts[styleId] || '';
+    }
   }
 
   /**
    * Валидировать выбранный стиль
    */
-  static isValidStyle(styleId: string): boolean {
-    return Object.keys(this.STYLE_PROMPTS).includes(styleId);
+  static async isValidStyle(styleId: string): Promise<boolean> {
+    try {
+      let promptKey: string;
+      
+      // Определяем правильный ключ в зависимости от типа стиля
+      if (styleId.startsWith('era_style_')) {
+        // Для стилей эпох используем ID как есть
+        promptKey = styleId;
+      } else {
+        // Для обычных стилей добавляем префикс
+        promptKey = `photo_style_${styleId}`;
+      }
+      
+      const prompt = await PromptService.getRawPrompt(promptKey);
+      return prompt !== null;
+    } catch (error) {
+      console.error(`❌ [PHOTO_STYLE] Ошибка валидации стиля "${styleId}":`, error);
+      
+      // Резервная валидация для всех типов стилей
+      const validPhotoStyles = ['passport', 'glamour', 'professional', 'cartoon'];
+      const validEraStyles = [
+        'era_style_russia_early_20th',
+        'era_style_russia_19th', 
+        'era_style_soviet_union',
+        'era_style_90s'
+      ];
+      
+      return validPhotoStyles.includes(styleId) || validEraStyles.includes(styleId);
+    }
   }
 
   /**
@@ -88,10 +143,12 @@ export class PhotoStylizationService {
       console.log('🎨 [STYLIZE] userId:', request.userId);
       console.log('🎨 [STYLIZE] telegramId:', request.telegramId);
       console.log('🎨 [STYLIZE] styleId:', request.styleId);
+      console.log('🎨 [STYLIZE] prompt:', request.prompt);
       console.log('🎨 [STYLIZE] originalFilename:', request.originalFilename);
 
       // Валидация стиля
-      if (!this.isValidStyle(request.styleId)) {
+      const isValid = await this.isValidStyle(request.styleId);
+      if (!isValid) {
         console.log('❌ [STYLIZE] Неверный стиль:', request.styleId);
         return {
           success: false,
@@ -117,9 +174,9 @@ export class PhotoStylizationService {
       }
 
       // Определяем тип запроса в зависимости от стиля
-      const eraStyles = ['russia_early_20', 'russia_19', 'soviet', 'nineties'];
-      const requestType = eraStyles.includes(request.styleId) ? 'era_style' : 'photo_stylize';
-      const apiName = eraStyles.includes(request.styleId) ? 'gemini_era_style' : 'gemini_stylize';
+      const isEraStyle = request.styleId.startsWith('era_style_');
+      const requestType = isEraStyle ? 'era_style' : 'photo_stylize';
+      const apiName = isEraStyle ? 'gemini_era_style' : 'gemini_stylize';
       
       // Создаем запрос в базе данных
       const apiRequest = await ApiRequest.create({
@@ -134,7 +191,7 @@ export class PhotoStylizationService {
           originalFilename: request.originalFilename,
           imageUrl: request.imageUrl,
           operation: requestType,
-          ...(eraStyles.includes(request.styleId) && { eraId: request.styleId })
+          ...(isEraStyle && { eraId: request.styleId })
         })
       });
 
@@ -155,9 +212,12 @@ export class PhotoStylizationService {
         const stylizedFilename = `stylized_${request.styleId}_${timestamp}${extension}`;
         const stylizedPath = path.join(stylizedDir, stylizedFilename);
 
-        // Отправляем запрос к Gemini API для стилизации
+        // Отправляем запрос к Gemini API для стилизации с retry механизмом
         console.log('🤖 [STYLIZE] Отправляем запрос к Gemini API...');
-        const styledImageBuffer = await this.callGeminiStyleAPI(request.localPath || request.imageUrl, request.prompt);
+        const styledImageBuffer = await this.executeWithRetry(
+          () => this.callGeminiStyleAPI(request.localPath || request.imageUrl, request.prompt),
+          'photo_stylization_api_call'
+        );
         
         // Сохраняем стилизованное изображение
         fs.writeFileSync(stylizedPath, styledImageBuffer);
@@ -169,16 +229,6 @@ export class PhotoStylizationService {
         
         console.log('🔗 [STYLIZE] URL стилизованного изображения:', styledUrl);
 
-        // Списываем средства с баланса пользователя
-        console.log('💸 [STYLIZE] Списываем средства с баланса...');
-        await BalanceService.debitBalance({
-          userId: request.userId,
-          amount: stylizationCost,
-          type: 'debit',
-          description: `Стилизация фото (${request.styleId})`,
-          referenceId: apiRequest.id.toString()
-        });
-
         // Обновляем статус запроса на completed
         await apiRequest.update({
           status: 'completed',
@@ -189,6 +239,21 @@ export class PhotoStylizationService {
             cost: stylizationCost
           })
         });
+
+        // Списываем средства с баланса пользователя только после успешного завершения
+        // Пропускаем списание при админском перезапуске
+        if (!request.adminRetry) {
+          console.log('💸 [STYLIZE] Списываем средства с баланса...');
+          await BalanceService.debitBalance({
+            userId: request.userId,
+            amount: stylizationCost,
+            type: 'debit',
+            description: `Стилизация фото (${request.styleId})`,
+            referenceId: apiRequest.id.toString()
+          });
+        } else {
+          console.log('🔧 [STYLIZE] Админский перезапуск - пропускаем списание баланса');
+        }
 
         console.log('✅ [STYLIZE] Стилизация завершена успешно');
 
@@ -212,7 +277,7 @@ export class PhotoStylizationService {
 
         return {
           success: false,
-          error: 'Временная ошибка обработки. Попробуйте позже'
+          error: 'Сервис временно недоступен, попробуйте чуть позже'
         };
       }
 
@@ -220,7 +285,7 @@ export class PhotoStylizationService {
       console.error('💥 [STYLIZE] Критическая ошибка стилизации:', error);
       return {
         success: false,
-        error: 'Произошла техническая ошибка. Попробуйте позже'
+        error: 'Сервис временно недоступен, попробуйте чуть позже'
       };
     }
   }
@@ -254,7 +319,7 @@ export class PhotoStylizationService {
       const mimeType = this.getMimeTypeFromPath(imagePath);
 
       console.log('🖼️ [GEMINI] Отправляем изображение на стилизацию...');
-      console.log('📝 [GEMINI] Промпт:', prompt.substring(0, 100) + '...');
+      console.log('📝 [GEMINI] Промпт:', prompt ? prompt.substring(0, 100) + '...' : 'undefined');
 
       // Формируем промпт для стилизации
       const apiPrompt = [
@@ -295,9 +360,9 @@ export class PhotoStylizationService {
         }
       }
 
-      // Если стилизованное изображение не получено, возвращаем оригинал
-      console.log('⚠️ [GEMINI] Стилизованное изображение не получено, возвращаем оригинал');
-      return imageBuffer;
+      // Если стилизованное изображение не получено, это ошибка API
+      console.log('❌ [GEMINI] Стилизованное изображение не получено от API');
+      throw new Error('API не вернул стилизованное изображение');
 
     } catch (error) {
       console.error('❌ [GEMINI] Ошибка вызова Gemini API:', error);
@@ -372,5 +437,116 @@ export class PhotoStylizationService {
         description: 'Эстетика девяностых и постсоветское время'
       }
     ];
+  }
+
+  /**
+   * Выполнить операцию с retry механизмом
+   */
+  private static async executeWithRetry<T>(
+    operation: () => Promise<T>,
+    operationName: string
+  ): Promise<T> {
+    const startTime = Date.now();
+    let attempt = 0;
+    let lastError: Error | null = null;
+    let totalDelayTime = 0;
+
+    console.log(`🚀 [RETRY] Начинаем ${operationName} с retry механизмом (макс. время: ${this.MAX_RETRY_DURATION}мс)`);
+
+    while (Date.now() - startTime < this.MAX_RETRY_DURATION) {
+      attempt++;
+      const attemptStartTime = Date.now();
+      
+      try {
+        console.log(`🔄 [RETRY] ${operationName} - попытка ${attempt} (время с начала: ${Date.now() - startTime}мс)`);
+        const result = await operation();
+        
+        const attemptDuration = Date.now() - attemptStartTime;
+        if (attempt > 1) {
+          console.log(`✅ [RETRY] ${operationName} - успешно выполнено с попытки ${attempt} за ${attemptDuration}мс (общее время: ${Date.now() - startTime}мс, время задержек: ${totalDelayTime}мс)`);
+        } else {
+          console.log(`✅ [RETRY] ${operationName} - выполнено с первой попытки за ${attemptDuration}мс`);
+        }
+        
+        return result;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        const attemptDuration = Date.now() - attemptStartTime;
+        console.log(`❌ [RETRY] ${operationName} - попытка ${attempt} неудачна за ${attemptDuration}мс:`, lastError.message);
+
+        // Проверяем, стоит ли повторять попытку
+        if (!this.isRetryableError(lastError)) {
+          console.log(`🚫 [RETRY] ${operationName} - ошибка не подлежит повторению, прекращаем попытки`);
+          throw lastError;
+        }
+
+        // Вычисляем задержку для следующей попытки
+        const delay = Math.min(
+          this.INITIAL_RETRY_DELAY * Math.pow(this.BACKOFF_MULTIPLIER, attempt - 1),
+          this.MAX_RETRY_DELAY
+        );
+
+        // Проверяем, остается ли время для следующей попытки
+        const remainingTime = this.MAX_RETRY_DURATION - (Date.now() - startTime);
+        if (delay >= remainingTime) {
+          console.log(`⏰ [RETRY] ${operationName} - время ожидания истекло (осталось ${remainingTime}мс, нужно ${delay}мс)`);
+          break;
+        }
+
+        console.log(`⏳ [RETRY] ${operationName} - ожидание ${delay}мс перед попыткой ${attempt + 1} (осталось времени: ${remainingTime}мс)`);
+        await this.sleep(delay);
+        totalDelayTime += delay;
+      }
+    }
+
+    const totalDuration = Date.now() - startTime;
+    console.log(`💥 [RETRY] ${operationName} - все попытки исчерпаны. Попыток: ${attempt}, общее время: ${totalDuration}мс, время задержек: ${totalDelayTime}мс`);
+    throw lastError || new Error(`Все попытки выполнения ${operationName} исчерпаны за ${totalDuration}мс`);
+  }
+
+  /**
+   * Определить, подлежит ли ошибка повторению
+   */
+  private static isRetryableError(error: Error): boolean {
+    const retryableMessages = [
+      'timeout',
+      'network',
+      'connection',
+      'unavailable',
+      'service unavailable',
+      'internal server error',
+      'bad gateway',
+      'gateway timeout',
+      'temporarily unavailable',
+      'rate limit',
+      'quota exceeded',
+      'fetch failed',
+      'socket hang up',
+      'econnreset',
+      'enotfound',
+      'etimedout',
+      'econnrefused',
+      'server error',
+      '503',
+      '502',
+      '504',
+      '429', // Too Many Requests
+      '500', // Internal Server Error
+      'internal'  // Для ошибок типа "Internal error encountered"
+    ];
+
+    const errorMessage = error.message.toLowerCase();
+    const isRetryable = retryableMessages.some(msg => errorMessage.includes(msg));
+    
+    console.log(`🔍 [RETRY] Анализ ошибки: "${error.message}" - подлежит повторению: ${isRetryable}`);
+    
+    return isRetryable;
+  }
+
+  /**
+   * Пауза на указанное количество миллисекунд
+   */
+  private static sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }

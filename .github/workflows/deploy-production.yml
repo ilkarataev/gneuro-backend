@@ -11,12 +11,36 @@ on:
 jobs:
   deploy-production:
     runs-on: ubuntu-latest
-    environment: production
+    environment: prod
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Get deployment info
+        id: deploy_info
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ github.event.inputs.tag }}" != "" ]]; then
+            echo "deploy_ref=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+            echo "deploy_type=manual_tag" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "deploy_ref=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            echo "deploy_type=tag_push" >> $GITHUB_OUTPUT
+          else
+            echo "deploy_ref=${GITHUB_REF#refs/heads/}" >> $GITHUB_OUTPUT
+            echo "deploy_type=branch_push" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Use SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+
+      - name: Add host to known_hosts
+=======
           ref: ${{ github.event.inputs.tag }}
           fetch-depth: 0
 
@@ -41,50 +65,77 @@ jobs:
 
       - name: Deploy to Production Server
         run: |
-          echo "🚀 Deploying tag ${{ github.event.inputs.tag }} to production..."
-          
-          # Set variables
+          echo "🚀 Deploying ${{ steps.deploy_info.outputs.deploy_ref }} to production environment..."
+          echo "📋 Deployment type: ${{ steps.deploy_info.outputs.deploy_type }}"
+
           USER="${{ vars.PROD_SERVER_USER }}"
           REMOTE="${{ vars.PROD_SERVER_HOST }}"
           BASE_NAME="backend-gneuro"
-          AREA="prod"
+          AREA="production"
           DESTINATION_PATH="/home/${USER}/${AREA}_${BASE_NAME}/"
           DOCKER_COMPOSE_FILE="docker-compose-prod.yaml"
-          AREA_ENV_FILE=".env-${AREA}"
-          
-          echo "� Destination: ${USER}@${REMOTE}:${DESTINATION_PATH}"
-          
-          # Check if .env file exists
-          if [ ! -f "$AREA_ENV_FILE" ]; then
-            echo "❌ Error: $AREA_ENV_FILE file not found."
-            exit 1
-          fi
-          
-          # Create destination directory
+
+          echo "📍 Destination: ${USER}@${REMOTE}:${DESTINATION_PATH}"
+
+          # Создаём папку назначения
           ssh -o StrictHostKeyChecking=no ${USER}@${REMOTE} "mkdir -p ${DESTINATION_PATH}"
-          
-          # Sync .env file
-          echo "� Syncing environment file..."
-          rsync -avz -e 'ssh -o StrictHostKeyChecking=no' ${AREA_ENV_FILE} ${USER}@${REMOTE}:${DESTINATION_PATH}/.env
-          
-          # Sync project files
-          echo "� Syncing project files..."
-          rsync -avz -e 'ssh -o StrictHostKeyChecking=no' docker* src services *.json ${USER}@${REMOTE}:${DESTINATION_PATH}/
-          
-          # Deploy with docker-compose
-          echo "� Starting docker-compose..."
-          ssh -o StrictHostKeyChecking=no ${USER}@${REMOTE} "cd ${DESTINATION_PATH} && docker compose -f ${DOCKER_COMPOSE_FILE} up -d --build"
-          
-          # Set permissions
-          echo "🔐 Setting permissions..."
-          ssh -o StrictHostKeyChecking=no ${USER}@${REMOTE} "sudo chmod 755 /home /home/${USER} /home/${USER}/${AREA}_${BASE_NAME}"
-          
+
+          # Собираем .env
+          echo "📄 Creating .env file from secrets..."
+          cat > .env << 'EOF'
+          ${{ secrets.PROD_ENV_FILE }}
+          EOF
+
+          # Узнаём UID/GID на сервере и добавляем, если их нет
+          REMOTE_UID=$(ssh -o StrictHostKeyChecking=no ${USER}@${REMOTE} "id -u")
+          REMOTE_GID=$(ssh -o StrictHostKeyChecking=no ${USER}@${REMOTE} "id -g")
+          grep -q '^APP_UID=' .env || echo "APP_UID=${REMOTE_UID}" >> .env
+          grep -q '^APP_GID=' .env || echo "APP_GID=${REMOTE_GID}" >> .env
+
+          # Заливаем .env
+          echo "📄 Syncing environment file..."
+          rsync -avz -e 'ssh -o StrictHostKeyChecking=no ' .env ${USER}@${REMOTE}:${DESTINATION_PATH}/.env
+          rm -f .env
+
+          # Проектные файлы
+          echo "📦 Syncing project files..."
+          rsync -avz -e 'ssh -o StrictHostKeyChecking=no ' docker* src services *.json ${USER}@${REMOTE}:${DESTINATION_PATH}/
+
+          # Создаем бэкап текущего состояния
+          echo "💾 Creating backup..."
+          ssh -o StrictHostKeyChecking=no ${USER}@${REMOTE} "cd ${DESTINATION_PATH} && docker compose -f ${DOCKER_COMPOSE_FILE} ps -q > /tmp/backup_containers.txt || true"
+
+          # Поднимаем compose
+          echo "🧩 Starting docker-compose..."
+          ssh -o StrictHostKeyChecking=no ${USER}@${REMOTE} "cd ${DESTINATION_PATH} && docker compose -f ${DOCKER_COMPOSE_FILE} up -d --build --force-recreate"
+
+          # Проверяем, что сервисы запустились
+          echo "🔍 Checking services health..."
+          sleep 30
+          ssh -o StrictHostKeyChecking=no ${USER}@${REMOTE} "cd ${DESTINATION_PATH} && docker compose -f ${DOCKER_COMPOSE_FILE} ps"
+
           echo "✅ Production deployment completed successfully!"
+
+      - name: Get commit info
+        id: commit
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+          echo "message=$(git log -1 --pretty=%B)" >> $GITHUB_OUTPUT
+          echo "author=$(git log -1 --pretty=%an)" >> $GITHUB_OUTPUT
+
+      - name: Success notification
+        if: success()
+        run: |
+          echo "## 🚀 Production Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Ref:** ${{ steps.deploy_info.outputs.deploy_ref }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Type:** ${{ steps.deploy_info.outputs.deploy_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ steps.commit.outputs.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Author:** ${{ steps.commit.outputs.author }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Message:** ${{ steps.commit.outputs.message }}" >> $GITHUB_STEP_SUMMARY
 
       - name: Deployment Summary
         run: |
           echo "## 🚀 Production Deployment Summary" >> $GITHUB_STEP_SUMMARY
-          echo "- **Tag:** ${{ github.event.inputs.tag }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Environment:** Production" >> $GITHUB_STEP_SUMMARY
           echo "- **Server:** ${{ vars.PROD_SERVER_HOST }}" >> $GITHUB_STEP_SUMMARY
           echo "- **User:** ${{ vars.PROD_SERVER_USER }}" >> $GITHUB_STEP_SUMMARY
@@ -95,8 +146,11 @@ jobs:
         if: failure()
         run: |
           echo "## ❌ Production Deployment Failed" >> $GITHUB_STEP_SUMMARY
-          echo "- **Tag:** ${{ github.event.inputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Ref:** ${{ steps.deploy_info.outputs.deploy_ref }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Type:** ${{ steps.deploy_info.outputs.deploy_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ steps.commit.outputs.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Environment:** Production" >> $GITHUB_STEP_SUMMARY
           echo "- **Server:** ${{ vars.PROD_SERVER_HOST }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Status:** ❌ Failed" >> $GITHUB_STEP_SUMMARY
           echo "- **Timestamp:** $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Please check logs and contact the development team**" >> $GITHUB_STEP_SUMMARY

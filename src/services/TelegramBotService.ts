@@ -31,6 +31,11 @@ interface BotInfo {
 export class TelegramBotService {
   private static BOT_TOKEN = process.env.BOT_TOKEN;
   private static BASE_URL = `https://api.telegram.org/bot${TelegramBotService.BOT_TOKEN}`;
+  
+  // Настройки таймаутов (можно настраивать через переменные окружения)
+  private static readonly TELEGRAM_API_TIMEOUT = parseInt(process.env.TELEGRAM_API_TIMEOUT || '60000'); // 60 секунд по умолчанию (увеличено с 30)
+  private static readonly IMAGE_CHECK_TIMEOUT = parseInt(process.env.IMAGE_CHECK_TIMEOUT || '20000'); // 20 секунд по умолчанию (увеличено с 10)
+  private static readonly MAX_RETRIES = parseInt(process.env.TELEGRAM_MAX_RETRIES || '5'); // 5 попыток по умолчанию (увеличено с 3)
 
   /**
    * Проверяем наличие токена бота
@@ -49,7 +54,7 @@ export class TelegramBotService {
       console.log('🔍 [TelegramBot] Проверяем доступность изображения:', imageUrl);
       
       const response = await axios.head(imageUrl, {
-        timeout: 5000, // 5 секунд таймаут
+        timeout: TelegramBotService.IMAGE_CHECK_TIMEOUT,
         headers: {
           'User-Agent': 'Telegram Bot'
         }
@@ -73,6 +78,53 @@ export class TelegramBotService {
   }
 
   /**
+   * Выполняет HTTP запрос с retry механизмом в случае таймаута
+   */
+  private static async makeRequestWithRetry<T>(
+    url: string,
+    payload: any,
+    maxRetries: number = 3,
+    timeoutMs: number = 30000
+  ): Promise<T> {
+    let lastError: any;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`🔄 [TelegramBot] Попытка ${attempt}/${maxRetries} отправки запроса`);
+        
+        const response = await axios.post<T>(url, payload, {
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          timeout: timeoutMs
+        });
+        
+        console.log(`✅ [TelegramBot] Запрос успешен с попытки ${attempt}`);
+        return response.data;
+        
+      } catch (error: any) {
+        lastError = error;
+        
+        // Проверяем, является ли ошибка таймаутом
+        const isTimeout = error.code === 'ECONNABORTED' || error.message?.includes('timeout');
+        
+        if (isTimeout && attempt < maxRetries) {
+          const delay = Math.min(2000 * Math.pow(2, attempt - 1), 30000); // Экспоненциальная задержка до 30 сек (увеличено с 10)
+          console.log(`⏱️ [TelegramBot] Таймаут на попытке ${attempt}, повторная попытка через ${delay}ms`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+        
+        // Если это не таймаут или это последняя попытка, прерываем
+        console.error(`❌ [TelegramBot] Ошибка на попытке ${attempt}:`, error.message);
+        break;
+      }
+    }
+    
+    throw lastError;
+  }
+
+  /**
    * Создает подготовленное сообщение с изображением для отправки через Mini App
    * @param photoUrl - URL изображения
    * @param caption - подпись к изображению
@@ -92,8 +144,12 @@ export class TelegramBotService {
       console.log('📤 [TelegramBot] Подпись:', caption);
       console.log('📤 [TelegramBot] userId:', userId);
 
+      // Преобразуем URL в полный HTTPS URL для Telegram
+      const fullPhotoUrl = TelegramBotService.convertToFullUrl(photoUrl);
+      console.log('🔗 [TelegramBot] Полный URL для подготовленного сообщения:', fullPhotoUrl);
+
       // Проверяем доступность изображения перед отправкой в Telegram API
-      const imageAvailable = await TelegramBotService.checkImageAvailability(photoUrl);
+      const imageAvailable = await TelegramBotService.checkImageAvailability(fullPhotoUrl);
       if (!imageAvailable) {
         console.warn('⚠️ [TelegramBot] Изображение недоступно, но продолжаем создание сообщения...');
         // Не блокируем создание сообщения, так как изображение может стать доступным позже
@@ -106,8 +162,8 @@ export class TelegramBotService {
         result: {
           type: 'photo',
           id: `photo_${Date.now()}`, // уникальный ID для результата
-          photo_url: photoUrl,
-          thumb_url: photoUrl, // используем тот же URL как thumbnail
+          photo_url: fullPhotoUrl,
+          thumb_url: fullPhotoUrl, // используем тот же URL как thumbnail
           ...(caption && { caption })
         },
         allow_user_chats: true,
@@ -119,34 +175,40 @@ export class TelegramBotService {
       console.log('📤 [TelegramBot] Отправляем запрос к savePreparedInlineMessage');
       console.log('📤 [TelegramBot] Payload:', JSON.stringify(payload, null, 2));
 
-      const response = await axios.post<TelegramBotResponse<PreparedMessageResult>>(
+      // Используем метод с retry механизмом
+      const responseData = await TelegramBotService.makeRequestWithRetry<TelegramBotResponse<PreparedMessageResult>>(
         `${TelegramBotService.BASE_URL}/savePreparedInlineMessage`,
         payload,
-        {
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          timeout: 10000 // 10 секунд таймаут
-        }
+        TelegramBotService.MAX_RETRIES,
+        TelegramBotService.TELEGRAM_API_TIMEOUT
       );
 
-      console.log('📤 [TelegramBot] Ответ от Telegram API:', response.data);
+      console.log('📤 [TelegramBot] Ответ от Telegram API:', responseData);
 
-      if (response.data?.ok && response.data?.result?.id) {
-        const preparedMessageId = response.data.result.id;
+      if (responseData?.ok && responseData?.result?.id) {
+        const preparedMessageId = responseData.result.id;
         console.log('✅ [TelegramBot] Подготовленное сообщение создано, ID:', preparedMessageId);
         return preparedMessageId;
       } else {
-        console.error('❌ [TelegramBot] Telegram API вернул неуспешный ответ:', response.data);
+        console.error('❌ [TelegramBot] Telegram API вернул неуспешный ответ:', responseData);
         return null;
       }
 
     } catch (error: any) {
       console.error('❌ [TelegramBot] Ошибка при создании подготовленного сообщения:', error);
       
-      if (error.response) {
+      // Детальная обработка различных типов ошибок
+      if (error.code === 'ECONNABORTED') {
+        console.error('❌ [TelegramBot] Все попытки исчерпаны: превышен таймаут запроса к Telegram API');
+      } else if (error.response) {
         console.error('❌ [TelegramBot] Ответ сервера:', error.response.data);
         console.error('❌ [TelegramBot] Статус:', error.response.status);
+        console.error('❌ [TelegramBot] Заголовки:', error.response.headers);
+      } else if (error.request) {
+        console.error('❌ [TelegramBot] Запрос был отправлен, но ответ не получен');
+        console.error('❌ [TelegramBot] Детали запроса:', error.config?.url);
+      } else {
+        console.error('❌ [TelegramBot] Общая ошибка:', error.message);
       }
       
       return null;
@@ -165,7 +227,7 @@ export class TelegramBotService {
 
       const response = await axios.get<TelegramBotResponse<BotInfo>>(
         `${TelegramBotService.BASE_URL}/getMe`,
-        { timeout: 5000 }
+        { timeout: TelegramBotService.TELEGRAM_API_TIMEOUT }
       );
 
       if (response.data?.ok && response.data?.result) {
@@ -206,6 +268,148 @@ export class TelegramBotService {
       return true;
     } catch (error) {
       console.warn('⚠️ [TelegramBot] Некорректный URL:', url, error);
+      return false;
+    }
+  }
+
+  /**
+   * Преобразует относительный URL в полный HTTPS URL
+   * @param url - URL для преобразования
+   * @returns полный HTTPS URL
+   */
+  private static convertToFullUrl(url: string): string {
+    // Если URL уже полный, возвращаем как есть
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return url;
+    }
+    
+    // Если URL относительный, преобразуем в полный
+    if (url.startsWith('/')) {
+      const baseUrl = process.env.BASE_URL || 'https://suno.ilkarvet.ru';
+      const cleanBaseUrl = baseUrl.replace(/\/api$/, ''); // Убираем /api если есть
+      return `${cleanBaseUrl}${url}`;
+    }
+    
+    // Если URL не начинается с /, добавляем /api/uploads/
+    const baseUrl = process.env.BASE_URL || 'https://suno.ilkarvet.ru';
+    const cleanBaseUrl = baseUrl.replace(/\/api$/, '');
+    return `${cleanBaseUrl}/api/uploads/${url}`;
+  }
+
+  /**
+   * Отправляет сообщение пользователю в Telegram
+   * @param chatId - ID чата пользователя
+   * @param text - текст сообщения
+   * @param photoUrl - URL изображения (опционально)
+   * @param caption - подпись к изображению (опционально)
+   * @returns true если сообщение отправлено успешно
+   */
+  static async sendMessage(
+    chatId: number,
+    text: string,
+    photoUrl?: string,
+    caption?: string
+  ): Promise<boolean> {
+    try {
+      TelegramBotService.checkBotToken();
+
+      console.log('📤 [TelegramBot] Отправляем сообщение пользователю');
+      console.log('📤 [TelegramBot] Chat ID:', chatId);
+      console.log('📤 [TelegramBot] Текст:', text);
+      console.log('📤 [TelegramBot] Фото URL:', photoUrl);
+
+      let payload: any;
+      let endpoint: string;
+
+      if (photoUrl) {
+        // Преобразуем URL в полный HTTPS URL для Telegram
+        const fullPhotoUrl = TelegramBotService.convertToFullUrl(photoUrl);
+        console.log('🔗 [TelegramBot] Полный URL для Telegram:', fullPhotoUrl);
+        
+        // Отправляем фото с подписью
+        endpoint = `${TelegramBotService.BASE_URL}/sendPhoto`;
+        payload = {
+          chat_id: chatId,
+          photo: fullPhotoUrl,
+          caption: caption || text,
+          parse_mode: 'HTML'
+        };
+      } else {
+        // Отправляем только текст
+        endpoint = `${TelegramBotService.BASE_URL}/sendMessage`;
+        payload = {
+          chat_id: chatId,
+          text: text,
+          parse_mode: 'HTML'
+        };
+      }
+
+      const responseData = await TelegramBotService.makeRequestWithRetry<TelegramBotResponse>(
+        endpoint,
+        payload,
+        TelegramBotService.MAX_RETRIES,
+        TelegramBotService.TELEGRAM_API_TIMEOUT
+      );
+
+      if (responseData?.ok) {
+        console.log('✅ [TelegramBot] Сообщение отправлено успешно');
+        return true;
+      } else {
+        console.error('❌ [TelegramBot] Ошибка отправки сообщения:', responseData);
+        return false;
+      }
+
+    } catch (error: any) {
+      console.error('❌ [TelegramBot] Ошибка при отправке сообщения:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Отправляет уведомление о завершении задачи пользователю
+   * @param telegramId - ID пользователя в Telegram
+   * @param taskType - тип задачи (photo_restore, photo_stylize, era_style, poet_style, image_generate)
+   * @param resultUrl - URL результата
+   * @param isSuccess - успешно ли выполнена задача
+   * @param errorMessage - сообщение об ошибке (если есть)
+   */
+  static async sendTaskCompletionNotification(
+    telegramId: number,
+    taskType: string,
+    resultUrl?: string,
+    isSuccess: boolean = true,
+    errorMessage?: string
+  ): Promise<boolean> {
+    try {
+      const taskNames: { [key: string]: string } = {
+        'photo_restore': 'Реставрация фото',
+        'photo_stylize': 'Стилизация фото',
+        'era_style': 'Стиль эпохи',
+        'poet_style': 'Стиль с поэтом',
+        'image_generate': 'Генерация изображения'
+      };
+
+      const taskName = taskNames[taskType] || taskType;
+
+      if (isSuccess && resultUrl) {
+        // Успешное завершение с результатом
+        const message = `✅ <b>${taskName} завершена!</b>\n\nВаш результат готов. Нажмите на изображение ниже, чтобы посмотреть:`;
+        
+        return await TelegramBotService.sendMessage(
+          telegramId,
+          message,
+          resultUrl,
+          `🎨 ${taskName} - результат готов!`
+        );
+      } else {
+        // Ошибка или неуспешное завершение
+        const message = `❌ <b>Ошибка при выполнении ${taskName}</b>\n\n${errorMessage || 'Произошла неизвестная ошибка. Попробуйте еще раз.'}`;
+        
+        return await TelegramBotService.sendMessage(telegramId, message);
+      }
+
+    } catch (error: any) {
+      console.error('❌ [TelegramBot] Ошибка при отправке уведомления о завершении задачи:', error);
       return false;
     }
   }

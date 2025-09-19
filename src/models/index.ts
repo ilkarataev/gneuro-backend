@@ -29,6 +29,7 @@ interface UserAttributes {
   reg_date: Date;
   last_activity: Date;
   leadtech_contact_id?: number;
+  is_admin: boolean;
 }
 
 interface UserCreationAttributes extends Optional<UserAttributes, 'id' | 'reg_date' | 'last_activity'> {}
@@ -70,7 +71,7 @@ interface ApiRequestAttributes {
   user_id: number;
   photo_id?: number;
   api_name: string;
-  request_type: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit' | 'photo_stylize' | 'era_style';
+  request_type: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit' | 'photo_stylize' | 'era_style' | 'poet_style';
   request_data?: string;
   response_data?: string;
   prompt?: string;
@@ -80,14 +81,16 @@ interface ApiRequestAttributes {
   request_date: Date;
   completed_date?: Date;
   error_message?: string;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
-interface ApiRequestCreationAttributes extends Optional<ApiRequestAttributes, 'id' | 'request_date'> {}
+interface ApiRequestCreationAttributes extends Optional<ApiRequestAttributes, 'id' | 'request_date' | 'createdAt' | 'updatedAt'> {}
 
 interface ServicePriceAttributes {
   id: number;
   service_name: string;
-  service_type: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit' | 'photo_stylize' | 'era_style';
+  service_type: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit' | 'photo_stylize' | 'era_style' | 'poet_style';
   price: number;
   currency: string;
   is_active: boolean;
@@ -97,6 +100,37 @@ interface ServicePriceAttributes {
 }
 
 interface ServicePriceCreationAttributes extends Optional<ServicePriceAttributes, 'id' | 'created_at' | 'updated_at'> {}
+
+interface PromptAttributes {
+  id: number;
+  key: string;
+  name: string;
+  description?: string;
+  content: string;
+  category: string;
+  variables?: Record<string, any>;
+  is_active: boolean;
+  created_by?: number;
+  version: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+interface PromptCreationAttributes extends Optional<PromptAttributes, 'id' | 'createdAt' | 'updatedAt'> {}
+
+interface PoetAttributes {
+  id: number;
+  name: string;
+  full_name: string;
+  description?: string;
+  image_path: string;
+  era?: string;
+  is_active: boolean;
+  created_at: Date;
+  updated_at: Date;
+}
+
+interface PoetCreationAttributes extends Optional<PoetAttributes, 'id' | 'created_at' | 'updated_at'> {}
 
 // Модели
 class User extends Model<UserAttributes, UserCreationAttributes> implements UserAttributes {
@@ -110,6 +144,7 @@ class User extends Model<UserAttributes, UserCreationAttributes> implements User
   public reg_date!: Date;
   public last_activity!: Date;
   public leadtech_contact_id?: number;
+  public is_admin!: boolean;
 
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
@@ -154,7 +189,7 @@ class ApiRequest extends Model<ApiRequestAttributes, ApiRequestCreationAttribute
   public user_id!: number;
   public photo_id?: number;
   public api_name!: string;
-  public request_type!: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit' | 'photo_stylize' | 'era_style';
+  public request_type!: 'photo_restore' | 'image_generate' | 'music_generate' | 'video_edit' | 'photo_stylize' | 'era_style' | 'poet_style';
   public request_data?: string;
   public response_data?: string;
   public prompt?: string;
@@ -182,6 +217,34 @@ class ServicePrice extends Model<ServicePriceAttributes, ServicePriceCreationAtt
 
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
+}
+
+class Prompt extends Model<PromptAttributes, PromptCreationAttributes> implements PromptAttributes {
+  public id!: number;
+  public key!: string;
+  public name!: string;
+  public description?: string;
+  public content!: string;
+  public category!: string;
+  public variables?: Record<string, any>;
+  public is_active!: boolean;
+  public created_by?: number;
+  public version!: number;
+
+  public readonly createdAt!: Date;
+  public readonly updatedAt!: Date;
+}
+
+class Poet extends Model<PoetAttributes, PoetCreationAttributes> implements PoetAttributes {
+  public id!: number;
+  public name!: string;
+  public full_name!: string;
+  public description?: string;
+  public image_path!: string;
+  public era?: string;
+  public is_active!: boolean;
+  public created_at!: Date;
+  public updated_at!: Date;
 }
 
 // Инициализация моделей
@@ -228,6 +291,11 @@ User.init({
   last_activity: { 
     type: DataTypes.DATE, 
     defaultValue: DataTypes.NOW 
+  },
+  is_admin: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false
   }
 }, {
   sequelize,
@@ -375,7 +443,7 @@ ApiRequest.init({
     allowNull: false
   },
   request_type: {
-    type: DataTypes.ENUM('photo_restore', 'image_generate', 'music_generate', 'video_edit', 'photo_stylize', 'era_style'),
+    type: DataTypes.ENUM('photo_restore', 'image_generate', 'music_generate', 'video_edit', 'photo_stylize', 'era_style', 'poet_style'),
     allowNull: false
   },
   request_data: {
@@ -413,6 +481,16 @@ ApiRequest.init({
   error_message: {
     type: DataTypes.TEXT,
     allowNull: true
+  },
+  createdAt: {
+    type: DataTypes.DATE,
+    allowNull: false,
+    defaultValue: DataTypes.NOW
+  },
+  updatedAt: {
+    type: DataTypes.DATE,
+    allowNull: false,
+    defaultValue: DataTypes.NOW
   }
 }, {
   sequelize,
@@ -431,7 +509,7 @@ ServicePrice.init({
     allowNull: false,
   },
   service_type: {
-    type: DataTypes.ENUM('photo_restore', 'image_generate', 'music_generate', 'video_edit', 'photo_stylize', 'era_style'),
+    type: DataTypes.ENUM('photo_restore', 'image_generate', 'music_generate', 'video_edit', 'photo_stylize', 'era_style', 'poet_style'),
     allowNull: false
   },
   price: {
@@ -466,6 +544,115 @@ ServicePrice.init({
   timestamps: true
 });
 
+Prompt.init({
+  id: {
+    type: DataTypes.INTEGER,
+    autoIncrement: true,
+    primaryKey: true,
+  },
+  key: {
+    type: DataTypes.STRING(100),
+    allowNull: false,
+    unique: true,
+  },
+  name: {
+    type: DataTypes.STRING(255),
+    allowNull: false,
+  },
+  description: {
+    type: DataTypes.TEXT,
+    allowNull: true,
+  },
+  content: {
+    type: DataTypes.TEXT,
+    allowNull: false,
+  },
+  category: {
+    type: DataTypes.STRING(50),
+    allowNull: false,
+    defaultValue: 'general',
+  },
+  variables: {
+    type: DataTypes.JSON,
+    allowNull: true,
+  },
+  is_active: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: true,
+  },
+  created_by: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
+  version: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 1,
+  },
+  createdAt: {
+    type: DataTypes.DATE,
+    allowNull: false,
+  },
+  updatedAt: {
+    type: DataTypes.DATE,
+    allowNull: false,
+  }
+}, {
+  sequelize,
+  tableName: 'prompts',
+  timestamps: true
+});
+
+Poet.init({
+  id: {
+    type: DataTypes.INTEGER,
+    autoIncrement: true,
+    primaryKey: true,
+  },
+  name: {
+    type: DataTypes.STRING(100),
+    allowNull: false,
+  },
+  full_name: {
+    type: DataTypes.STRING(200),
+    allowNull: false,
+  },
+  description: {
+    type: DataTypes.TEXT,
+    allowNull: true,
+  },
+  image_path: {
+    type: DataTypes.STRING(500),
+    allowNull: false,
+  },
+  era: {
+    type: DataTypes.STRING(50),
+    allowNull: true,
+  },
+  is_active: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: true,
+  },
+  created_at: {
+    type: DataTypes.DATE,
+    allowNull: false,
+    defaultValue: DataTypes.NOW,
+  },
+  updated_at: {
+    type: DataTypes.DATE,
+    allowNull: false,
+    defaultValue: DataTypes.NOW,
+  }
+}, {
+  sequelize,
+  tableName: 'poets',
+  timestamps: true,
+  createdAt: 'created_at',
+  updatedAt: 'updated_at'
+});
+
 // Связи между моделями
 User.hasMany(Payment, { foreignKey: 'user_id', as: 'payments' });
 Payment.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
@@ -479,4 +666,4 @@ ApiRequest.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 Photo.hasMany(ApiRequest, { foreignKey: 'photo_id', as: 'requests' });
 ApiRequest.belongsTo(Photo, { foreignKey: 'photo_id', as: 'photo' });
 
-export { sequelize, User, Payment, Photo, ApiRequest, ServicePrice };
+export { sequelize, User, Payment, Photo, ApiRequest, ServicePrice, Prompt, Poet };

@@ -7,6 +7,7 @@ import { Photo, ApiRequest, User } from '../models/index';
 import { BalanceService } from './BalanceService';
 import { PriceService } from './PriceService';
 import { FileManagerService } from './FileManagerService';
+import { PromptService } from './PromptService';
 
 export interface RestorePhotoRequest {
   userId: number;
@@ -18,6 +19,7 @@ export interface RestorePhotoRequest {
     scratch_removal?: boolean;
     color_correction?: boolean;
   };
+  adminRetry?: boolean; // Флаг для отключения списания баланса при админском перезапуске
 }
 
 export interface RestorePhotoResult {
@@ -30,7 +32,12 @@ export interface RestorePhotoResult {
 
 export class PhotoRestorationService {
   private static readonly GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'test_key';
-  private static readonly RESTORATION_PROMPT = `Restore this old, faded black-and-white photograph by removing scratches, tears, dust, and any damage. Enhance sharpness, contrast, and details for a clear, high-resolution look. Add realistic, natural colors: warm skin tones, vibrant clothing and objects as appropriate to the era, and a balanced, lifelike color palette throughout the scene.`;
+  
+  // Настройки для retry механизма
+  private static readonly MAX_RETRY_DURATION = parseInt(process.env.GEMINI_MAX_RETRY_DURATION || '300000'); // 5 минут по умолчанию
+  private static readonly INITIAL_RETRY_DELAY = parseInt(process.env.GEMINI_INITIAL_RETRY_DELAY || '1000'); // 1 секунда по умолчанию
+  private static readonly MAX_RETRY_DELAY = parseInt(process.env.GEMINI_MAX_RETRY_DELAY || '30000'); // 30 секунд по умолчанию
+  private static readonly BACKOFF_MULTIPLIER = parseFloat(process.env.GEMINI_BACKOFF_MULTIPLIER || '2'); // Множитель для экспоненциального роста
 
   /**
    * Получить текущую стоимость реставрации
@@ -77,24 +84,28 @@ export class PhotoRestorationService {
       });
 
       try {
-        // Отправляем запрос к Gemini API
-        const response = await this.callGeminiAPI(request.imageUrl, request.options, request.userId, request.telegramId, request.moduleName);
+        // Отправляем запрос к Gemini API с retry механизмом
+        const response = await this.executeWithRetry(
+          () => this.callGeminiAPI(request.imageUrl, request.options, request.userId, request.telegramId, request.moduleName),
+          'photo_restoration_api_call'
+        );
         
-        if (response.success && response.restoredUrl) {
-          // Обновляем запись фото
-          await photo.update({
-            restored_url: response.restoredUrl,
-            status: 'completed',
-            processing_time: new Date().getTime() - photo.createdAt.getTime()
-          });
+        // Обновляем запись фото
+        await photo.update({
+          restored_url: response.restoredUrl,
+          status: 'completed',
+          processing_time: new Date().getTime() - photo.createdAt.getTime()
+        });
 
-          // Обновляем API запрос
-          await apiRequest.update({
-            response_data: JSON.stringify(response),
-            status: 'completed'
-          });
+        // Обновляем API запрос
+        await apiRequest.update({
+          response_data: JSON.stringify(response),
+          status: 'completed'
+        });
 
-          // Списываем деньги с баланса
+        // Списываем деньги с баланса
+        // Пропускаем списание при админском перезапуске
+        if (!request.adminRetry) {
           await BalanceService.debitBalance({
             userId: request.userId,
             amount: restorationCost,
@@ -102,34 +113,19 @@ export class PhotoRestorationService {
             description: 'Реставрация фотографии',
             referenceId: `photo_${photo.id}`
           });
-
-          return {
-            success: true,
-            photoId: photo.id,
-            restoredUrl: response.restoredUrl,
-            cost: restorationCost
-          };
         } else {
-          // Ошибка API
-          await photo.update({
-            status: 'failed',
-            error_message: response.error || 'Неизвестная ошибка API'
-          });
-
-          await apiRequest.update({
-            response_data: JSON.stringify(response),
-            status: 'failed',
-            error_message: response.error
-          });
-
-          return { 
-            success: false, 
-            error: response.error || 'Ошибка при обработке изображения'
-          };
+          console.log('🔧 [RESTORE] Админский перезапуск - пропускаем списание баланса');
         }
 
+        return {
+          success: true,
+          photoId: photo.id,
+          restoredUrl: response.restoredUrl,
+          cost: restorationCost
+        };
+
       } catch (apiError) {
-        // Ошибка при вызове API
+        // Ошибка при вызове API (включая retry)
         const errorMessage = apiError instanceof Error ? apiError.message : 'Ошибка API';
         
         await photo.update({
@@ -142,9 +138,10 @@ export class PhotoRestorationService {
           error_message: errorMessage
         });
 
+        // Возвращаем более понятное сообщение пользователю
         return { 
           success: false, 
-          error: 'Ошибка при обращении к сервису реставрации'
+          error: 'Сервис временно недоступен, попробуйте чуть позже'
         };
       }
 
@@ -152,7 +149,7 @@ export class PhotoRestorationService {
       console.error('Ошибка в restorePhoto:', error);
       return { 
         success: false, 
-        error: 'Внутренняя ошибка сервера'
+        error: 'Сервис временно недоступен, попробуйте чуть позже'
       };
     }
   }
@@ -186,102 +183,195 @@ export class PhotoRestorationService {
    * Вызов Gemini API для реставрации фото
    */
   private static async callGeminiAPI(imageUrl: string, options?: any, userId?: number, telegramId?: number, moduleName?: string): Promise<{ success: boolean; restoredUrl?: string; error?: string }> {
-    try {
-      // Получаем изображение и конвертируем в base64
-      const imageBase64 = await this.getImageAsBase64(imageUrl);
-      if (!imageBase64) {
-        return {
-          success: false,
-          error: 'Не удалось получить изображение для обработки'
-        };
+    // Получаем изображение и конвертируем в base64
+    const imageBase64 = await this.getImageAsBase64(imageUrl);
+    if (!imageBase64) {
+      throw new Error('Не удалось получить изображение для обработки');
+    }
+
+    // Инициализируем Google GenAI
+    const genai = new GoogleGenAI({ 
+      apiKey: this.GEMINI_API_KEY
+    });
+
+    // Формируем промпт для реставрации
+    const restorationPromptText = await PromptService.getPrompt('photo_restoration_base');
+    
+    const prompt = [
+      { text: restorationPromptText },
+      {
+        inlineData: {
+          mimeType: 'image/jpeg',
+          data: imageBase64,
+        },
+      },
+    ];
+
+    console.log('📸 [GEMINI] Отправляем запрос к API...');
+    
+    // Создаем промис с таймаутом
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Timeout: запрос превысил 3 минуты')), 180000);
+    });
+
+    const apiPromise = genai.models.generateContent({
+      model: "gemini-2.5-flash-image-preview",
+      contents: prompt,
+    });
+
+    const response = await Promise.race([apiPromise, timeoutPromise]) as any;
+
+    console.log('📸 [GEMINI] Получен ответ от API');
+    console.log('📸 [GEMINI] Количество кандидатов:', response.candidates?.length || 0);
+
+    if (response.candidates && response.candidates.length > 0) {
+      const candidate = response.candidates[0];
+      if (!candidate.content || !candidate.content.parts) {
+        console.log('❌ [GEMINI] Неверная структура ответа - отсутствует content.parts');
+        throw new Error('Неверная структура ответа API');
       }
 
-      // Инициализируем Google GenAI
-      const genai = new GoogleGenAI({ 
-        apiKey: this.GEMINI_API_KEY
-      });
+      console.log('📸 [GEMINI] Количество частей контента:', candidate.content.parts.length);
 
-      // Формируем промпт для реставрации
-      const prompt = [
-        { text: this.RESTORATION_PROMPT },
-        {
-          inlineData: {
-            mimeType: 'image/jpeg',
-            data: imageBase64,
-          },
-        },
-      ];
-
-      console.log('📸 [GEMINI] Отправляем запрос к API...');
-      
-      // Создаем промис с таймаутом
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Timeout: запрос превысил 3 минуты')), 180000);
-      });
-
-      const apiPromise = genai.models.generateContent({
-        model: "gemini-2.5-flash-image-preview",
-        contents: prompt,
-      });
-
-      const response = await Promise.race([apiPromise, timeoutPromise]) as any;
-
-      console.log('📸 [GEMINI] Получен ответ от API');
-      console.log('📸 [GEMINI] Количество кандидатов:', response.candidates?.length || 0);
-
-      if (response.candidates && response.candidates.length > 0) {
-        const candidate = response.candidates[0];
-        if (!candidate.content || !candidate.content.parts) {
-          console.log('❌ [GEMINI] Неверная структура ответа - отсутствует content.parts');
+      for (const part of candidate.content.parts) {
+        if (part.text) {
+          console.log('📸 [GEMINI] Найден текст:', part.text.substring(0, 100) + '...');
+        } else if (part.inlineData && part.inlineData.data) {
+          console.log('✅ [GEMINI] Найдено изображение, MIME:', part.inlineData.mimeType);
+          
+          // Сохраняем восстановленное изображение с поддержкой модуля
+          const restoredImagePath = await this.saveBase64Image(
+            part.inlineData.data, 
+            part.inlineData.mimeType || 'image/jpeg', 
+            telegramId,
+            moduleName
+          );
+          
           return {
-            success: false,
-            error: 'Неверная структура ответа API'
+            success: true,
+            restoredUrl: restoredImagePath
           };
         }
+      }
 
-        console.log('📸 [GEMINI] Количество частей контента:', candidate.content.parts.length);
+      // Если дошли до сюда - изображения не было найдено
+      console.log('❌ [GEMINI] В ответе не найдено восстановленное изображение');
+      throw new Error('API не вернул восстановленное изображение');
+    } else {
+      console.log('❌ [GEMINI] API не вернул кандидатов');
+      throw new Error('API не вернул результат');
+    }
+  }
 
-        for (const part of candidate.content.parts) {
-          if (part.text) {
-            console.log('📸 [GEMINI] Найден текст:', part.text.substring(0, 100) + '...');
-          } else if (part.inlineData && part.inlineData.data) {
-            console.log('✅ [GEMINI] Найдено изображение, MIME:', part.inlineData.mimeType);
-            
-            // Сохраняем восстановленное изображение с поддержкой модуля
-            const restoredImagePath = await this.saveBase64Image(
-              part.inlineData.data, 
-              part.inlineData.mimeType || 'image/jpeg', 
-              telegramId,
-              moduleName
-            );
-            
-            return {
-              success: true,
-              restoredUrl: restoredImagePath
-            };
-          }
+  /**
+   * Выполнить операцию с retry механизмом
+   */
+  private static async executeWithRetry<T>(
+    operation: () => Promise<T>,
+    operationName: string
+  ): Promise<T> {
+    const startTime = Date.now();
+    let attempt = 0;
+    let lastError: Error | null = null;
+    let totalDelayTime = 0;
+
+    console.log(`🚀 [RETRY] Начинаем ${operationName} с retry механизмом (макс. время: ${this.MAX_RETRY_DURATION}мс)`);
+
+    while (Date.now() - startTime < this.MAX_RETRY_DURATION) {
+      attempt++;
+      const attemptStartTime = Date.now();
+      
+      try {
+        console.log(`🔄 [RETRY] ${operationName} - попытка ${attempt} (время с начала: ${Date.now() - startTime}мс)`);
+        const result = await operation();
+        
+        const attemptDuration = Date.now() - attemptStartTime;
+        if (attempt > 1) {
+          console.log(`✅ [RETRY] ${operationName} - успешно выполнено с попытки ${attempt} за ${attemptDuration}мс (общее время: ${Date.now() - startTime}мс, время задержек: ${totalDelayTime}мс)`);
+        } else {
+          console.log(`✅ [RETRY] ${operationName} - выполнено с первой попытки за ${attemptDuration}мс`);
+        }
+        
+        return result;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        const attemptDuration = Date.now() - attemptStartTime;
+        console.log(`❌ [RETRY] ${operationName} - попытка ${attempt} неудачна за ${attemptDuration}мс:`, lastError.message);
+
+        // Проверяем, стоит ли повторять попытку
+        if (!this.isRetryableError(lastError)) {
+          console.log(`🚫 [RETRY] ${operationName} - ошибка не подлежит повторению, прекращаем попытки`);
+          throw lastError;
         }
 
-        // Если дошли до сюда - изображения не было найдено
-        console.log('❌ [GEMINI] В ответе не найдено восстановленное изображение');
-        return {
-          success: false,
-          error: 'API не вернул восстановленное изображение'
-        };
-      } else {
-        console.log('❌ [GEMINI] API не вернул кандидатов');
-        return {
-          success: false,
-          error: 'API не вернул результат'
-        };
+        // Вычисляем задержку для следующей попытки
+        const delay = Math.min(
+          this.INITIAL_RETRY_DELAY * Math.pow(this.BACKOFF_MULTIPLIER, attempt - 1),
+          this.MAX_RETRY_DELAY
+        );
+
+        // Проверяем, остается ли время для следующей попытки
+        const remainingTime = this.MAX_RETRY_DURATION - (Date.now() - startTime);
+        if (delay >= remainingTime) {
+          console.log(`⏰ [RETRY] ${operationName} - время ожидания истекло (осталось ${remainingTime}мс, нужно ${delay}мс)`);
+          break;
+        }
+
+        console.log(`⏳ [RETRY] ${operationName} - ожидание ${delay}мс перед попыткой ${attempt + 1} (осталось времени: ${remainingTime}мс)`);
+        await this.sleep(delay);
+        totalDelayTime += delay;
       }
-    } catch (error) {
-      console.error('❌ [GEMINI] Ошибка при вызове API:', error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Неизвестная ошибка API'
-      };
     }
+
+    const totalDuration = Date.now() - startTime;
+    console.log(`💥 [RETRY] ${operationName} - все попытки исчерпаны. Попыток: ${attempt}, общее время: ${totalDuration}мс, время задержек: ${totalDelayTime}мс`);
+    throw lastError || new Error(`Все попытки выполнения ${operationName} исчерпаны за ${totalDuration}мс`);
+  }
+
+  /**
+   * Определить, подлежит ли ошибка повторению
+   */
+  private static isRetryableError(error: Error): boolean {
+    const retryableMessages = [
+      'timeout',
+      'network',
+      'connection',
+      'unavailable',
+      'service unavailable',
+      'internal server error',
+      'bad gateway',
+      'gateway timeout',
+      'temporarily unavailable',
+      'rate limit',
+      'quota exceeded',
+      'fetch failed',
+      'socket hang up',
+      'econnreset',
+      'enotfound',
+      'etimedout',
+      'econnrefused',
+      'server error',
+      '503',
+      '502',
+      '504',
+      '429', // Too Many Requests
+      '500', // Internal Server Error
+      'internal'  // Для ошибок типа "Internal error encountered"
+    ];
+
+    const errorMessage = error.message.toLowerCase();
+    const isRetryable = retryableMessages.some(msg => errorMessage.includes(msg));
+    
+    console.log(`🔍 [RETRY] Анализ ошибки: "${error.message}" - подлежит повторению: ${isRetryable}`);
+    
+    return isRetryable;
+  }
+
+  /**
+   * Пауза на указанное количество миллисекунд
+   */
+  private static sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   /**
@@ -409,7 +499,7 @@ export class PhotoRestorationService {
    */
   static async getUserPhotoHistoryByModule(
     userId: number, 
-    moduleType: 'photo_restore' | 'photo_stylize' | 'era_style',
+    moduleType: 'photo_restore' | 'photo_stylize' | 'era_style' | 'image_generate'| 'poet_style',
     page: number = 1, 
     limit: number = 10
   ): Promise<{
@@ -499,11 +589,26 @@ export class PhotoRestorationService {
             return (req as any).photo;
           } else {
             // Создаем временный объект Photo для отображения
+            let original_url = 'unknown';
+            let restored_url = null;
+            
+            // Для разных типов модулей извлекаем URL по-разному
+            if (moduleType === 'image_generate') {
+              // Для генерации изображений нет оригинального изображения
+              original_url = req.request_data ? `prompt: ${JSON.parse(req.request_data).prompt || 'unknown'}` : 'unknown';
+              // Результат генерации сохраняется в imageUrl
+              restored_url = req.response_data ? JSON.parse(req.response_data).imageUrl || null : null;
+            } else {
+              // Для реставрации и стилизации
+              original_url = req.request_data ? JSON.parse(req.request_data).imageUrl || 'unknown' : 'unknown';
+              restored_url = req.response_data ? JSON.parse(req.response_data).styledUrl || null : null;
+            }
+            
             return {
               id: req.id,
               user_id: req.user_id,
-              original_url: req.request_data ? JSON.parse(req.request_data).imageUrl || 'unknown' : 'unknown',
-              restored_url: req.response_data ? JSON.parse(req.response_data).styledUrl || null : null,
+              original_url: original_url,
+              restored_url: restored_url,
               status: req.status,
               createdAt: req.createdAt,
               updatedAt: req.updatedAt,

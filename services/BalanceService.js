@@ -2,6 +2,7 @@
 const { User, Payment, ApiRequest } = require('./models');
 const { Sequelize } = require('sequelize');
 
+
 class BalanceService {
   // Получить баланс пользователя
   static async getUserBalance(telegramId) {

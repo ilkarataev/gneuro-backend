@@ -160,6 +160,7 @@ export class PriceService {
     const defaultPrices: { [key: string]: number } = {
       'photo_restore': 10,
       'image_generate': 30,
+      'image_generation': 30, // Псевдоним для image_generate
       'music_generate': 100,
       'video_edit': 200,
       'photo_stylize': 10,

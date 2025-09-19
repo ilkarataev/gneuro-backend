@@ -43,6 +43,7 @@ deploy() {
 
     rsync -avz -e 'ssh -o StrictHostKeyChecking=no' docker* src services  *.json ${DEPLOY_USER}@"$REMOTE:$DESTINATION_PATH/"
     ssh -o StrictHostKeyChecking=no ${DEPLOY_USER}@$REMOTE "cd $DESTINATION_PATH && docker compose -f ${DOCKER_COMPOSE_FILE} up -d --build"
+    ssh -o StrictHostKeyChecking=no ${DEPLOY_USER}@$REMOTE "sudo chmod 755 /home /home/gneuro /home/gneuro/prod_backend-gneuro"
 }
 
 # Deploy
