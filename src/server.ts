@@ -13,6 +13,7 @@ import { BalanceService } from './services/BalanceService';
 import { TelegramBotService } from './services/TelegramBotService';
 import { ImageCopyService } from './services/ImageCopyService';
 import { UserAgreementService } from './services/UserAgreementService';
+import { FileDeduplicationService } from './services/FileDeduplicationService';
 import pricesRouter from './routes/prices';
 import webhookRouter from './routes/webhook';
 import adminRouter from './routes/admin';
@@ -256,27 +257,37 @@ app.post('/api/photos/restore', upload.single('photo'), async (req: MulterReques
     }
     console.log('📁 [RESTORE] Используем модуль:', module);
     
-    // Используем FileManagerService для перемещения файла
-    const finalPath = FileManagerService.moveFileToUserDirectory(
+    // Используем дедупликацию для обработки файла
+    const fileStats = require('fs').statSync(req.file.path);
+    const dedupResult = await FileDeduplicationService.processFileUpload(
       req.file.path,
+      parseInt(userId),
       parseInt(telegramId),
       module,
-      req.file.filename
+      {
+        fileSize: fileStats.size,
+        mimeType: req.file.mimetype
+      }
     );
+    
+    const finalPath = dedupResult.finalPath;
+    const filename = path.basename(finalPath);
     
     // Формируем URL к файлу с помощью FileManagerService
     const imageFullUrl = FileManagerService.createFileUrl(
       parseInt(telegramId),
       module,
-      req.file.filename
+      filename
     );
+    
+    console.log('📸 [RESTORE] Файл обработан с дедупликацией. Новый файл:', dedupResult.isNewFile);
     
     console.log('📸 [RESTORE] finalPath:', finalPath);
     console.log('📸 [RESTORE] imageFullUrl:', imageFullUrl);
 
     // Запускаем процесс реставрации
     console.log('📸 [RESTORE] Вызываем PhotoRestorationService...');
-    const result = await PhotoRestorationService.restorePhoto({
+    const restoreResult = await PhotoRestorationService.restorePhoto({
       userId: parseInt(userId), // Используем database userId для записи в БД
       telegramId: parseInt(telegramId), // Добавляем telegramId для создания папок
       moduleName: module, // Добавляем moduleName для организации папок
@@ -284,23 +295,23 @@ app.post('/api/photos/restore', upload.single('photo'), async (req: MulterReques
       options: options ? JSON.parse(options) : {}
     });
 
-    console.log('📸 [RESTORE] Результат реставрации:', result);
+    console.log('📸 [RESTORE] Результат реставрации:', restoreResult);
     
     // Проверяем результат и возвращаем соответствующий статус
-    if (result.success) {
-      res.json(result);
+    if (restoreResult.success) {
+      res.json(restoreResult);
     } else {
       // Проверяем тип ошибки для более точного ответа
       let statusCode = 422;
-      let errorMessage = result.error || 'Сервис временно недоступен, попробуйте чуть позже';
+      let errorMessage = restoreResult.error || 'Сервис временно недоступен, попробуйте чуть позже';
       
-      if (result.error === 'SAFETY_AGREEMENT_REQUIRED') {
+      if (restoreResult.error === 'SAFETY_AGREEMENT_REQUIRED') {
         statusCode = 403;
         errorMessage = 'Необходимо согласие с правилами безопасности';
-      } else if (result.error === 'CONTENT_SAFETY_VIOLATION') {
+      } else if (restoreResult.error === 'CONTENT_SAFETY_VIOLATION') {
         statusCode = 400;
         errorMessage = 'К сожалению, это изображение не может быть обработано по соображениям безопасности. Пожалуйста, выберите другое фото.';
-      } else if (result.error === 'COPYRIGHT_VIOLATION') {
+      } else if (restoreResult.error === 'COPYRIGHT_VIOLATION') {
         statusCode = 400;
         errorMessage = 'Изображение не может быть обработано из-за нарушения авторских прав. Пожалуйста, используйте другое изображение.';
       }
@@ -308,7 +319,7 @@ app.post('/api/photos/restore', upload.single('photo'), async (req: MulterReques
       res.status(statusCode).json({ 
         error: errorMessage,
         success: false,
-        errorCode: result.error
+        errorCode: restoreResult.error
       });
     }
   } catch (error) {
@@ -593,21 +604,31 @@ app.post('/api/photos/stylize', upload.single('photo'), async (req: MulterReques
       });
     }
 
-    // Перемещаем файл из временной папки в структуру папок пользователя
+    // Используем дедупликацию для обработки файла
     const moduleName = 'photo_stylize';
-    const finalPath = FileManagerService.moveFileToUserDirectory(
+    const fileStats = require('fs').statSync(req.file.path);
+    const dedupResult = await FileDeduplicationService.processFileUpload(
       req.file.path,
+      parseInt(userId),
       parseInt(telegramId),
       moduleName,
-      req.file.filename
+      {
+        fileSize: fileStats.size,
+        mimeType: req.file.mimetype
+      }
     );
+    
+    const finalPath = dedupResult.finalPath;
+    const filename = path.basename(finalPath);
     
     // Формируем URL к файлу
     const imageFullUrl = FileManagerService.createFileUrl(
       parseInt(telegramId),
       moduleName,
-      req.file.filename
+      filename
     );
+    
+    console.log('🎨 [STYLIZE] Файл обработан с дедупликацией. Новый файл:', dedupResult.isNewFile);
     
     console.log('🎨 [STYLIZE] finalPath:', finalPath);
     console.log('🎨 [STYLIZE] imageFullUrl:', imageFullUrl);
@@ -631,7 +652,7 @@ app.post('/api/photos/stylize', upload.single('photo'), async (req: MulterReques
     // Запускаем процесс стилизации
     console.log('🎨 [STYLIZE] Вызываем PhotoStylizationService...');
     console.log('🎨 [STYLIZE] finalPrompt:', finalPrompt);
-    const result = await PhotoStylizationService.stylizePhoto({
+    const stylizeResult = await PhotoStylizationService.stylizePhoto({
       userId: parseInt(userId),
       telegramId: parseInt(telegramId),
       imageUrl: imageFullUrl, // Передаем полный URL для сохранения в request_data
@@ -641,15 +662,15 @@ app.post('/api/photos/stylize', upload.single('photo'), async (req: MulterReques
       originalFilename: req.file.originalname
     });
 
-    console.log('🎨 [STYLIZE] Результат стилизации:', result);
+    console.log('🎨 [STYLIZE] Результат стилизации:', stylizeResult);
     
     // Проверяем результат и возвращаем соответствующий статус
-    if (result.success) {
-      res.json(result);
+    if (stylizeResult.success) {
+      res.json(stylizeResult);
     } else {
       // При неуспешной обработке возвращаем статус 422 (Unprocessable Entity)
       res.status(422).json({ 
-        error: result.error || 'Сервис временно недоступен, попробуйте чуть позже',
+        error: stylizeResult.error || 'Сервис временно недоступен, попробуйте чуть позже',
         success: false
       });
     }
@@ -926,21 +947,31 @@ app.post('/api/photos/era-style', upload.single('photo'), async (req: MulterRequ
       });
     }
 
-    // Перемещаем файл из временной папки в структуру папок пользователя
+    // Используем дедупликацию для обработки файла
     const moduleName = 'era-style';
-    const finalPath = FileManagerService.moveFileToUserDirectory(
+    const fileStats = require('fs').statSync(req.file.path);
+    const dedupResult = await FileDeduplicationService.processFileUpload(
       req.file.path,
+      parseInt(userId),
       parseInt(telegramId),
       moduleName,
-      req.file.filename
+      {
+        fileSize: fileStats.size,
+        mimeType: req.file.mimetype
+      }
     );
+    
+    const finalPath = dedupResult.finalPath;
+    const filename = path.basename(finalPath);
     
     // Формируем URL к файлу
     const imageFullUrl = FileManagerService.createFileUrl(
       parseInt(telegramId),
       moduleName,
-      req.file.filename
+      filename
     );
+    
+    console.log('🏛️ [ERA_STYLE] Файл обработан с дедупликацией. Новый файл:', dedupResult.isNewFile);
     
     console.log('🏛️ [ERA_STYLE] finalPath:', finalPath);
     console.log('🏛️ [ERA_STYLE] imageFullUrl:', imageFullUrl);
@@ -965,7 +996,7 @@ app.post('/api/photos/era-style', upload.single('photo'), async (req: MulterRequ
     console.log('🏛️ [ERA_STYLE] finalPrompt длина:', finalPrompt?.length);
     console.log('🏛️ [ERA_STYLE] finalPrompt содержание:', finalPrompt?.substring(0, 200) + '...');
 
-    const result = await EraStyleService.stylePhotoByEra({
+    const eraResult = await EraStyleService.stylePhotoByEra({
       userId: parseInt(userId),
       telegramId: parseInt(telegramId),
       imageUrl: imageFullUrl, // Передаем полный URL для сохранения в request_data
@@ -974,8 +1005,8 @@ app.post('/api/photos/era-style', upload.single('photo'), async (req: MulterRequ
       originalFilename: req.file.originalname
     });
     
-    console.log('🏛️ [ERA_STYLE] Результат изменения стиля эпохи:', result);
-    res.json(result);
+    console.log('🏛️ [ERA_STYLE] Результат изменения стиля эпохи:', eraResult);
+    res.json(eraResult);
   } catch (error) {
     console.error('❌ [ERA_STYLE] Ошибка при изменении стиля эпохи:', error);
     
@@ -1108,28 +1139,38 @@ app.post('/api/photos/poet-style', upload.single('photo'), async (req: MulterReq
       });
     }
 
-    // Перемещаем файл из временной папки в структуру папок пользователя
+    // Используем дедупликацию для обработки файла
     const moduleName = 'poet_style';
-    const finalPath = FileManagerService.moveFileToUserDirectory(
+    const fileStats = require('fs').statSync(req.file.path);
+    const dedupResult = await FileDeduplicationService.processFileUpload(
       req.file.path,
+      parseInt(userId),
       parseInt(telegramId),
       moduleName,
-      req.file.filename
+      {
+        fileSize: fileStats.size,
+        mimeType: req.file.mimetype
+      }
     );
+    
+    const finalPath = dedupResult.finalPath;
+    const filename = path.basename(finalPath);
     
     // Формируем URL к файлу
     const imageFullUrl = FileManagerService.createFileUrl(
       parseInt(telegramId),
       moduleName,
-      req.file.filename
+      filename
     );
+    
+    console.log('🎭 [POET_STYLE] Файл обработан с дедупликацией. Новый файл:', dedupResult.isNewFile);
     
     console.log('🎭 [POET_STYLE] finalPath:', finalPath);
     console.log('🎭 [POET_STYLE] imageFullUrl:', imageFullUrl);
 
     // Запускаем процесс создания селфи с поэтом
     console.log('🎭 [POET_STYLE] Вызываем PoetStyleService...');
-    const result = await PoetStyleService.stylePhotoWithPoet({
+    const poetResult = await PoetStyleService.stylePhotoWithPoet({
       userId: parseInt(userId),
       telegramId: parseInt(telegramId),
       imageUrl: imageFullUrl,
@@ -1139,8 +1180,8 @@ app.post('/api/photos/poet-style', upload.single('photo'), async (req: MulterReq
       originalFilename: req.file.originalname
     });
 
-    console.log('🎭 [POET_STYLE] Результат создания селфи:', result);
-    res.json(result);
+    console.log('🎭 [POET_STYLE] Результат создания селфи:', poetResult);
+    res.json(poetResult);
   } catch (error) {
     console.error('❌ [POET_STYLE] Ошибка при создании селфи с поэтом:', error);
     

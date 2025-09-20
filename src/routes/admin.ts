@@ -7,6 +7,7 @@ import { EraStyleService } from '../services/EraStyleService';
 import { PoetStyleService } from '../services/PoetStyleService';
 import { ImageGenerationService } from '../services/ImageGenerationService';
 import { TelegramBotService } from '../services/TelegramBotService';
+import { FileDeduplicationService } from '../services/FileDeduplicationService';
 
 const router = express.Router();
 
@@ -866,6 +867,30 @@ router.get('/background-stats', requireAdmin, async (req: Request, res: Response
     res.status(500).json({
       success: false,
       message: 'Ошибка получения статистики фонового процессора',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * Очистка дубликатов файлов
+ */
+router.post('/cleanup-duplicates', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    console.log('🧹 [ADMIN] Запуск очистки дубликатов');
+    
+    const result = await FileDeduplicationService.cleanupDuplicates();
+    
+    res.json({
+      success: true,
+      message: 'Очистка дубликатов завершена',
+      removedFiles: result.removedFiles,
+      freedSpace: result.freedSpace
+    });
+  } catch (error) {
+    console.error('❌ [ADMIN] Ошибка при очистке дубликатов:', error);
+    res.status(500).json({
+      success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
     });
   }

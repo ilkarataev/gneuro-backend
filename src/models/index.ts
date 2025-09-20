@@ -63,6 +63,7 @@ interface PhotoAttributes {
   request_params?: string;
   processing_time?: number;
   error_message?: string;
+  md5_hash?: string;
 }
 
 interface PhotoCreationAttributes extends Optional<PhotoAttributes, 'id' | 'original_width' | 'original_height' | 'file_size' | 'mime_type'> {}
@@ -181,6 +182,7 @@ class Photo extends Model<PhotoAttributes, PhotoCreationAttributes> implements P
   public request_params?: string;
   public processing_time?: number;
   public error_message?: string;
+  public md5_hash?: string;
 
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
@@ -412,6 +414,11 @@ Photo.init({
   error_message: {
     type: DataTypes.TEXT,
     allowNull: true
+  },
+  md5_hash: {
+    type: DataTypes.STRING(32),
+    allowNull: true,
+    comment: 'MD5 хеш файла для дедупликации'
   }
 }, {
   sequelize,

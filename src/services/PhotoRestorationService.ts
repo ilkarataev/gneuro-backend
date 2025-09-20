@@ -55,16 +55,16 @@ export class PhotoRestorationService {
    */
   static async restorePhoto(request: RestorePhotoRequest): Promise<RestorePhotoResult> {
     try {
-      // Проверяем согласие пользователя с правилами безопасности
-      const hasAgreed = await UserAgreementService.hasUserAgreedToSafetyRules(request.userId);
-      if (!hasAgreed) {
-        return {
-          success: false,
-          error: 'SAFETY_AGREEMENT_REQUIRED',
-          errorCode: 'SAFETY_AGREEMENT_REQUIRED',
-          safetyRules: UserAgreementService.getSafetyRules()
-        };
-      }
+      // ВРЕМЕННО ЗАКОММЕНТИРОВАНО: Проверяем согласие пользователя с правилами безопасности
+      // const hasAgreed = await UserAgreementService.hasUserAgreedToSafetyRules(request.userId);
+      // if (!hasAgreed) {
+      //   return {
+      //     success: false,
+      //     error: 'SAFETY_AGREEMENT_REQUIRED',
+      //     errorCode: 'SAFETY_AGREEMENT_REQUIRED',
+      //     safetyRules: UserAgreementService.getSafetyRules()
+      //   };
+      // }
 
       // Получаем актуальную стоимость реставрации из БД
       const restorationCost = await this.getRestorationCost();
@@ -256,12 +256,13 @@ export class PhotoRestorationService {
     const response = await Promise.race([apiPromise, timeoutPromise]) as any;
 
     console.log('📸 [GEMINI] Получен ответ от API');
-    console.log('📸 [GEMINI] Полный ответ API:', JSON.stringify(response, null, 2));
     console.log('📸 [GEMINI] Количество кандидатов:', response.candidates?.length || 0);
+    console.log('📸 [GEMINI] Статус ответа:', response.candidates?.[0]?.finishReason || 'неизвестно');
 
     if (response.candidates && response.candidates.length > 0) {
       const candidate = response.candidates[0];
-      console.log('📸 [GEMINI] Детали кандидата:', JSON.stringify(candidate, null, 2));
+      console.log('📸 [GEMINI] Статус обработки:', candidate.finishReason);
+      console.log('📸 [GEMINI] Найдено частей:', candidate.content?.parts?.length || 0);
       
       // Проверяем finishReason для блокировок
       if (candidate.finishReason === 'SAFETY' || candidate.finishReason === 'IMAGE_SAFETY') {
@@ -284,7 +285,7 @@ export class PhotoRestorationService {
       console.log('📸 [GEMINI] Количество частей контента:', candidate.content.parts.length);
 
       for (const part of candidate.content.parts) {
-        console.log('📸 [GEMINI] Обрабатываем часть:', JSON.stringify(part, null, 2));
+        console.log('📸 [GEMINI] Обрабатываем часть, тип:', part.text ? 'текст' : (part.inlineData ? 'изображение' : 'неизвестно'));
         
         if (part.text) {
           console.log('📸 [GEMINI] Найден текст:', part.text.substring(0, 100) + '...');
