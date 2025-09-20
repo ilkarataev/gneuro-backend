@@ -8,6 +8,7 @@ import { BalanceService } from './BalanceService';
 import { PriceService } from './PriceService';
 import { FileManagerService } from './FileManagerService';
 import { PromptService } from './PromptService';
+import { ErrorMessageTranslator } from '../utils/ErrorMessageTranslator';
 
 export interface EraStyleRequest {
   userId: number;
@@ -17,6 +18,7 @@ export interface EraStyleRequest {
   prompt: string;
   originalFilename: string;
   adminRetry?: boolean; // Флаг для отключения списания баланса при админском перезапуске
+  existingApiRequestId?: number; // ID существующего API запроса для фонового процессора
 }
 
 export interface EraStyleResult {
@@ -185,23 +187,34 @@ export class EraStyleService {
         };
       }
 
-      // Создаем запрос в базе данных
-      const apiRequest = await ApiRequest.create({
-        user_id: request.userId,
-        api_name: 'era_style',
-        request_type: 'era_style',
-        request_data: JSON.stringify({
-          eraId: request.eraId,
-          originalFilename: request.originalFilename,
-          imageUrl: request.imageUrl,
-          prompt: request.prompt
-        }),
-        prompt: request.prompt,
-        cost: stylizationCost,
-        status: 'pending'
-      });
-
-      console.log('💳 [ERA_STYLE] Создан запрос API с ID:', apiRequest.id);
+      // Создаем или получаем существующий запрос в базе данных
+      let apiRequest: any;
+      
+      if (request.existingApiRequestId) {
+        // Для фонового процессора - используем существующий запрос
+        apiRequest = await ApiRequest.findByPk(request.existingApiRequestId);
+        if (!apiRequest) {
+          throw new Error('Существующий API запрос не найден');
+        }
+        console.log('🔄 [ERA_STYLE] Используем существующий API запрос с ID:', apiRequest.id);
+      } else {
+        // Для новых запросов - создаем новый
+        apiRequest = await ApiRequest.create({
+          user_id: request.userId,
+          api_name: 'era_style',
+          request_type: 'era_style',
+          request_data: JSON.stringify({
+            eraId: request.eraId,
+            originalFilename: request.originalFilename,
+            imageUrl: request.imageUrl,
+            prompt: request.prompt
+          }),
+          prompt: request.prompt,
+          cost: stylizationCost,
+          status: 'pending'
+        });
+        console.log('💳 [ERA_STYLE] Создан новый API запрос с ID:', apiRequest.id);
+      }
       
       // Обновляем статус на "processing"
       await apiRequest.update({ status: 'processing' });
@@ -218,14 +231,16 @@ export class EraStyleService {
       if (!processingResult.success) {
         console.log('❌ [ERA_STYLE] Ошибка обработки изображения:', processingResult.error);
         
+        const friendlyErrorMessage = ErrorMessageTranslator.getFriendlyErrorMessage(processingResult.error || 'Ошибка обработки изображения');
+        
         await apiRequest.update({ 
           status: 'failed', 
-          error_message: processingResult.error 
+          error_message: friendlyErrorMessage 
         });
 
         return {
           success: false,
-          error: 'Сервис временно недоступен, попробуйте чуть позже'
+          error: friendlyErrorMessage
         };
       }
 
@@ -240,13 +255,18 @@ export class EraStyleService {
       });
 
       // Списываем средства с баланса пользователя только после успешного завершения
-      console.log('💰 [ERA_STYLE] Списываем средства с баланса...');
-      const balanceResult = await BalanceService.debit(request.userId, stylizationCost, `Изменение стиля эпохи: ${request.eraId}`);
+      // И только для новых запросов, не для фонового процессора
+      if (!request.existingApiRequestId) {
+        console.log('💰 [ERA_STYLE] Списываем средства с баланса...');
+        const balanceResult = await BalanceService.debit(request.userId, stylizationCost, `Изменение стиля эпохи: ${request.eraId}`);
 
-      if (!balanceResult.success) {
-        console.log('❌ [ERA_STYLE] Ошибка списания средств');
-        // В случае ошибки списания возвращаем результат как успешный, но логируем ошибку
-        console.error('⚠️ [ERA_STYLE] Не удалось списать средства, но обработка прошла успешно');
+        if (!balanceResult.success) {
+          console.log('❌ [ERA_STYLE] Ошибка списания средств');
+          // В случае ошибки списания возвращаем результат как успешный, но логируем ошибку
+          console.error('⚠️ [ERA_STYLE] Не удалось списать средства, но обработка прошла успешно');
+        }
+      } else {
+        console.log('🔄 [ERA_STYLE] Пропускаем списание баланса для существующего запроса (фоновый процессор)');
       }
 
       console.log('✅ [ERA_STYLE] Изменение стиля эпохи завершено');
@@ -261,9 +281,12 @@ export class EraStyleService {
 
     } catch (error) {
       console.error('💥 [ERA_STYLE] Непредвиденная ошибка:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Сервис временно недоступен, попробуйте чуть позже';
+      const friendlyErrorMessage = ErrorMessageTranslator.getFriendlyErrorMessage(errorMessage);
+      
       return {
         success: false,
-        error: 'Сервис временно недоступен, попробуйте чуть позже'
+        error: friendlyErrorMessage
       };
     }
   }
@@ -344,9 +367,12 @@ export class EraStyleService {
 
     } catch (error) {
       console.error('💥 [ERA_STYLE] Ошибка обработки изображения:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Ошибка обработки изображения';
+      const friendlyErrorMessage = ErrorMessageTranslator.getFriendlyErrorMessage(errorMessage);
+      
       return {
         success: false,
-        error: 'Ошибка обработки изображения'
+        error: friendlyErrorMessage
       };
     }
   }
@@ -506,6 +532,19 @@ export class EraStyleService {
     
     if (response.candidates && response.candidates.length > 0) {
       const candidate = response.candidates[0];
+      
+      // Проверяем finishReason для блокировок
+      if (candidate.finishReason === 'SAFETY' || candidate.finishReason === 'IMAGE_SAFETY') {
+        console.log('🚫 [GEMINI] Запрос заблокирован по соображениям безопасности');
+        console.log('🚫 [GEMINI] Finish reason:', candidate.finishReason);
+        throw new Error('CONTENT_SAFETY_VIOLATION');
+      }
+      
+      if (candidate.finishReason === 'RECITATION') {
+        console.log('🚫 [GEMINI] Запрос заблокирован из-за нарушения авторских прав');
+        throw new Error('COPYRIGHT_VIOLATION');
+      }
+      
       if (candidate.content && candidate.content.parts) {
         for (const part of candidate.content.parts) {
           if (part.inlineData && part.inlineData.data) {

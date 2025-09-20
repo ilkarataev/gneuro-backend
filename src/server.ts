@@ -12,6 +12,7 @@ import { ImageGenerationService } from './services/ImageGenerationService';
 import { BalanceService } from './services/BalanceService';
 import { TelegramBotService } from './services/TelegramBotService';
 import { ImageCopyService } from './services/ImageCopyService';
+import { UserAgreementService } from './services/UserAgreementService';
 import pricesRouter from './routes/prices';
 import webhookRouter from './routes/webhook';
 import adminRouter from './routes/admin';
@@ -54,6 +55,14 @@ const upload = multer({
   fileFilter: (req, file, cb) => {
     // Проверяем тип файла
     if (file.mimetype.startsWith('image/')) {
+      // Запрещаем HEIC файлы
+      if (file.mimetype === 'image/heic' || file.mimetype === 'image/heif' || 
+          file.originalname.toLowerCase().endsWith('.heic') || 
+          file.originalname.toLowerCase().endsWith('.heif')) {
+        const error = new Error('HEIC/HEIF формат не поддерживается. Пожалуйста, используйте JPEG или PNG') as any;
+        error.name = 'HEIC_NOT_SUPPORTED';
+        return cb(error, false);
+      }
       cb(null, true);
     } else {
       cb(null, false); // Отклоняем файл без ошибки
@@ -281,11 +290,25 @@ app.post('/api/photos/restore', upload.single('photo'), async (req: MulterReques
     if (result.success) {
       res.json(result);
     } else {
-      // При неуспешной обработке возвращаем статус 422 (Unprocessable Entity)
-      // и передаем понятное сообщение об ошибке клиенту
-      res.status(422).json({ 
-        error: result.error || 'Сервис временно недоступен, попробуйте чуть позже',
-        success: false
+      // Проверяем тип ошибки для более точного ответа
+      let statusCode = 422;
+      let errorMessage = result.error || 'Сервис временно недоступен, попробуйте чуть позже';
+      
+      if (result.error === 'SAFETY_AGREEMENT_REQUIRED') {
+        statusCode = 403;
+        errorMessage = 'Необходимо согласие с правилами безопасности';
+      } else if (result.error === 'CONTENT_SAFETY_VIOLATION') {
+        statusCode = 400;
+        errorMessage = 'К сожалению, это изображение не может быть обработано по соображениям безопасности. Пожалуйста, выберите другое фото.';
+      } else if (result.error === 'COPYRIGHT_VIOLATION') {
+        statusCode = 400;
+        errorMessage = 'Изображение не может быть обработано из-за нарушения авторских прав. Пожалуйста, используйте другое изображение.';
+      }
+      
+      res.status(statusCode).json({ 
+        error: errorMessage,
+        success: false,
+        errorCode: result.error
       });
     }
   } catch (error) {
@@ -304,9 +327,25 @@ app.post('/api/photos/restore', upload.single('photo'), async (req: MulterReques
       }
     }
     
-    res.status(500).json({ 
-      error: 'Сервис временно недоступен, попробуйте чуть позже',
-      success: false
+    // Проверяем тип ошибки для более точного ответа
+    let statusCode = 500;
+    let errorMessage = 'Сервис временно недоступен, попробуйте чуть позже';
+    
+    if ((error as Error).message === 'SAFETY_AGREEMENT_REQUIRED') {
+      statusCode = 403;
+      errorMessage = 'Необходимо согласие с правилами безопасности';
+    } else if ((error as Error).message === 'CONTENT_SAFETY_VIOLATION') {
+      statusCode = 400;
+      errorMessage = 'К сожалению, это изображение не может быть обработано по соображениям безопасности. Пожалуйста, выберите другое фото.';
+    } else if ((error as Error).message === 'COPYRIGHT_VIOLATION') {
+      statusCode = 400;
+      errorMessage = 'Изображение не может быть обработано из-за нарушения авторских прав. Пожалуйста, используйте другое изображение.';
+    }
+    
+    res.status(statusCode).json({ 
+      error: errorMessage,
+      success: false,
+      errorCode: (error as Error).message
     });
   }
 });/**
@@ -543,6 +582,17 @@ app.post('/api/photos/stylize', upload.single('photo'), async (req: MulterReques
       });
     }
 
+    // Дополнительная проверка на HEIC файлы
+    if (req.file.mimetype === 'image/heic' || req.file.mimetype === 'image/heif' || 
+        req.file.originalname.toLowerCase().endsWith('.heic') || 
+        req.file.originalname.toLowerCase().endsWith('.heif')) {
+      return res.status(400).json({
+        success: false,
+        error: 'HEIC/HEIF формат не поддерживается. Пожалуйста, используйте JPEG или PNG',
+        code: 'HEIC_NOT_SUPPORTED'
+      });
+    }
+
     // Перемещаем файл из временной папки в структуру папок пользователя
     const moduleName = 'photo_stylize';
     const finalPath = FileManagerService.moveFileToUserDirectory(
@@ -619,9 +669,25 @@ app.post('/api/photos/stylize', upload.single('photo'), async (req: MulterReques
       }
     }
     
-    res.status(500).json({
+    // Проверяем тип ошибки для более точного ответа
+    let statusCode = 500;
+    let errorMessage = 'Сервис временно недоступен, попробуйте чуть позже';
+    
+    if ((error as Error).message === 'SAFETY_AGREEMENT_REQUIRED') {
+      statusCode = 403;
+      errorMessage = 'Необходимо согласие с правилами безопасности';
+    } else if ((error as Error).message === 'CONTENT_SAFETY_VIOLATION') {
+      statusCode = 400;
+      errorMessage = 'К сожалению, это изображение не может быть обработано по соображениям безопасности. Пожалуйста, выберите другое фото.';
+    } else if ((error as Error).message === 'COPYRIGHT_VIOLATION') {
+      statusCode = 400;
+      errorMessage = 'Изображение не может быть обработано из-за нарушения авторских прав. Пожалуйста, используйте другое изображение.';
+    }
+    
+    res.status(statusCode).json({
       success: false,
-      error: 'Сервис временно недоступен, попробуйте чуть позже'
+      error: errorMessage,
+      errorCode: (error as Error).message
     });
   }
 });
@@ -849,6 +915,17 @@ app.post('/api/photos/era-style', upload.single('photo'), async (req: MulterRequ
       });
     }
 
+    // Дополнительная проверка на HEIC файлы
+    if (req.file.mimetype === 'image/heic' || req.file.mimetype === 'image/heif' || 
+        req.file.originalname.toLowerCase().endsWith('.heic') || 
+        req.file.originalname.toLowerCase().endsWith('.heif')) {
+      return res.status(400).json({
+        success: false,
+        error: 'HEIC/HEIF формат не поддерживается. Пожалуйста, используйте JPEG или PNG',
+        code: 'HEIC_NOT_SUPPORTED'
+      });
+    }
+
     // Перемещаем файл из временной папки в структуру папок пользователя
     const moduleName = 'era-style';
     const finalPath = FileManagerService.moveFileToUserDirectory(
@@ -1020,6 +1097,17 @@ app.post('/api/photos/poet-style', upload.single('photo'), async (req: MulterReq
       });
     }
 
+    // Дополнительная проверка на HEIC файлы
+    if (req.file.mimetype === 'image/heic' || req.file.mimetype === 'image/heif' || 
+        req.file.originalname.toLowerCase().endsWith('.heic') || 
+        req.file.originalname.toLowerCase().endsWith('.heif')) {
+      return res.status(400).json({
+        success: false,
+        error: 'HEIC/HEIF формат не поддерживается. Пожалуйста, используйте JPEG или PNG',
+        code: 'HEIC_NOT_SUPPORTED'
+      });
+    }
+
     // Перемещаем файл из временной папки в структуру папок пользователя
     const moduleName = 'poet_style';
     const finalPath = FileManagerService.moveFileToUserDirectory(
@@ -1069,9 +1157,25 @@ app.post('/api/photos/poet-style', upload.single('photo'), async (req: MulterReq
       }
     }
     
-    res.status(500).json({
+    // Проверяем тип ошибки для более точного ответа
+    let statusCode = 500;
+    let errorMessage = 'Произошла техническая ошибка. Попробуйте позже';
+    
+    if ((error as Error).message === 'SAFETY_AGREEMENT_REQUIRED') {
+      statusCode = 403;
+      errorMessage = 'Необходимо согласие с правилами безопасности';
+    } else if ((error as Error).message === 'CONTENT_SAFETY_VIOLATION') {
+      statusCode = 400;
+      errorMessage = 'К сожалению, это изображение не может быть обработано по соображениям безопасности. Пожалуйста, выберите другое фото.';
+    } else if ((error as Error).message === 'COPYRIGHT_VIOLATION') {
+      statusCode = 400;
+      errorMessage = 'Изображение не может быть обработано из-за нарушения авторских прав. Пожалуйста, используйте другое изображение.';
+    }
+    
+    res.status(statusCode).json({
       success: false,
-      error: 'Произошла техническая ошибка. Попробуйте позже'
+      error: errorMessage,
+      errorCode: (error as Error).message
     });
   }
 });
@@ -1435,8 +1539,96 @@ app.use((error: MulterError | Error, req: Request, res: Response, next: NextFunc
     }
   }
   
+  // Обработка ошибки HEIC
+  if (error.name === 'HEIC_NOT_SUPPORTED') {
+    return res.status(400).json({ 
+      error: 'HEIC/HEIF формат не поддерживается. Пожалуйста, используйте JPEG или PNG',
+      code: 'HEIC_NOT_SUPPORTED'
+    });
+  }
+  
   console.error('Ошибка:', error);
   res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+});
+
+/**
+ * Получить правила безопасности
+ */
+app.get('/api/safety-rules', async (req, res) => {
+  try {
+    const safetyRules = UserAgreementService.getSafetyRules();
+    res.json({
+      success: true,
+      data: safetyRules
+    });
+  } catch (error) {
+    console.error('Ошибка при получении правил безопасности:', error);
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+  }
+});
+
+/**
+ * Проверить согласие пользователя с правилами безопасности
+ */
+app.get('/api/safety-agreement/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    if (!userId || isNaN(parseInt(userId))) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'userId обязателен и должен быть числом'
+      });
+    }
+
+    const hasAgreed = await UserAgreementService.hasUserAgreedToSafetyRules(parseInt(userId));
+    
+    res.json({
+      success: true,
+      hasAgreed,
+      safetyRules: hasAgreed ? null : UserAgreementService.getSafetyRules()
+    });
+  } catch (error) {
+    console.error('Ошибка при проверке согласия:', error);
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+  }
+});
+
+/**
+ * Записать согласие пользователя с правилами безопасности
+ */
+app.post('/api/safety-agreement', async (req, res) => {
+  try {
+    const { userId, ipAddress, userAgent } = req.body;
+    
+    if (!userId || isNaN(parseInt(userId))) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'userId обязателен и должен быть числом'
+      });
+    }
+
+    const success = await UserAgreementService.recordSafetyRulesAgreement(
+      parseInt(userId),
+      ipAddress,
+      userAgent
+    );
+
+    if (success) {
+      res.json({
+        success: true,
+        message: 'Согласие с правилами безопасности записано'
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: 'Не удалось записать согласие'
+      });
+    }
+  } catch (error) {
+    console.error('Ошибка при записи согласия:', error);
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+  }
 });
 
 app.listen(PORT, async () => {

@@ -1,4 +1,4 @@
-import { ApiRequest, User } from '../models/index';
+import { ApiRequest, User, Photo } from '../models/index';
 import { PhotoStylizationService } from './PhotoStylizationService';
 import { EraStyleService } from './EraStyleService';
 import { PoetStyleService } from './PoetStyleService';
@@ -6,6 +6,7 @@ import { PhotoRestorationService } from './PhotoRestorationService';
 import { ImageGenerationService } from './ImageGenerationService';
 import { TelegramBotService } from './TelegramBotService';
 import { BalanceService } from './BalanceService';
+import { ErrorMessageTranslator } from '../utils/ErrorMessageTranslator';
 
 export interface BackgroundTaskResult {
   success: boolean;
@@ -17,6 +18,7 @@ export class BackgroundTaskProcessor {
   private static readonly PROCESSING_INTERVAL = parseInt(process.env.BACKGROUND_PROCESSING_INTERVAL || '30000'); // 30 секунд по умолчанию
   private static readonly MAX_CONCURRENT_TASKS = parseInt(process.env.MAX_CONCURRENT_BACKGROUND_TASKS || '3'); // Максимум 3 задачи одновременно
   private static readonly MAX_RETRY_AGE = parseInt(process.env.MAX_BACKGROUND_RETRY_AGE || '86400000'); // 24 часа по умолчанию
+  private static readonly MAX_RETRY_ATTEMPTS = 3; // Максимум 3 попытки
   private static isProcessing = false;
   private static processingCount = 0;
 
@@ -52,6 +54,9 @@ export class BackgroundTaskProcessor {
           },
           request_date: {
             [require('sequelize').Op.gte]: new Date(Date.now() - this.MAX_RETRY_AGE) // Только свежие задачи
+          },
+          retry_count: {
+            [require('sequelize').Op.lt]: this.MAX_RETRY_ATTEMPTS // Не больше максимального количества попыток
           },
           // Для failed задач проверяем, что прошло достаточно времени с последнего обновления (минимум 10 минут)
           [require('sequelize').Op.or]: [
@@ -98,12 +103,16 @@ export class BackgroundTaskProcessor {
     this.processingCount++;
     const taskId = apiRequest.id;
     const requestType = apiRequest.request_type;
+    const currentRetryCount = apiRequest.retry_count || 0;
 
     try {
-      console.log(`🔄 [BACKGROUND] Начинаем обработку задачи ${taskId} типа ${requestType}`);
+      console.log(`🔄 [BACKGROUND] Начинаем обработку задачи ${taskId} типа ${requestType} (попытка ${currentRetryCount + 1}/${this.MAX_RETRY_ATTEMPTS})`);
 
-      // Обновляем статус на processing
-      await apiRequest.update({ status: 'processing' });
+      // Увеличиваем счетчик попыток
+      await apiRequest.update({ 
+        status: 'processing',
+        retry_count: currentRetryCount + 1
+      });
 
       // Обрабатываем задачу в зависимости от типа
       const result = await this.executeTask(apiRequest);
@@ -128,37 +137,126 @@ export class BackgroundTaskProcessor {
           console.log(`💰 [BACKGROUND] Пропускаем списание баланса для failed задачи ${taskId} (уже списано ранее)`);
         }
 
-        // Отправляем уведомление пользователю
+        // Отправляем уведомление пользователю ТОЛЬКО при успехе
         await this.sendSuccessNotification(apiRequest, result.resultUrl!);
 
         console.log(`✅ [BACKGROUND] Задача ${taskId} выполнена успешно`);
 
       } else {
-        // Задача завершилась с ошибкой
-        await apiRequest.update({
-          status: 'failed',
-          error_message: result.error || 'Ошибка фоновой обработки',
-          completed_date: new Date()
-        });
+        // Проверяем, является ли ошибка блокировкой безопасности
+        const isSafetyBlock = result.error === 'CONTENT_SAFETY_VIOLATION' || 
+                             result.error === 'COPYRIGHT_VIOLATION' || 
+                             result.error === 'SAFETY_AGREEMENT_REQUIRED';
 
-        // Отправляем уведомление об ошибке
-        await this.sendErrorNotification(apiRequest, result.error!);
+        if (isSafetyBlock) {
+          // Блокировки безопасности - помечаем как выполненные и уведомляем пользователя
+          const friendlyErrorMessage = ErrorMessageTranslator.getFriendlyErrorMessage(result.error!);
+          
+          await apiRequest.update({
+            status: 'completed',
+            error_message: friendlyErrorMessage,
+            completed_date: new Date(),
+            response_data: JSON.stringify({
+              blocked: true,
+              reason: result.error,
+              processedAt: new Date().toISOString(),
+              processedBy: 'background_processor'
+            })
+          });
 
-        console.log(`❌ [BACKGROUND] Задача ${taskId} завершилась с ошибкой: ${result.error}`);
+          // Обновляем связанную фотографию, если есть
+          if (apiRequest.photo_id) {
+            await Photo.update(
+              { 
+                status: 'completed',
+                error_message: friendlyErrorMessage
+              },
+              { where: { id: apiRequest.photo_id } }
+            );
+          }
+
+          // Отправляем уведомление о блокировке
+          await this.sendSafetyBlockNotification(apiRequest, result.error!);
+
+          console.log(`🚫 [BACKGROUND] Задача ${taskId} заблокирована по соображениям безопасности: ${result.error}`);
+
+        } else if (currentRetryCount + 1 >= this.MAX_RETRY_ATTEMPTS) {
+          // Достигнуто максимальное количество попыток
+          const friendlyErrorMessage = ErrorMessageTranslator.getFriendlyErrorMessage(
+            result.error || 'Превышено максимальное количество попыток'
+          );
+          
+          await apiRequest.update({
+            status: 'failed',
+            error_message: friendlyErrorMessage,
+            completed_date: new Date()
+          });
+
+          // Обновляем связанную фотографию, если есть
+          if (apiRequest.photo_id) {
+            await Photo.update(
+              { 
+                status: 'failed',
+                error_message: friendlyErrorMessage
+              },
+              { where: { id: apiRequest.photo_id } }
+            );
+          }
+
+          // Отправляем уведомление об ошибке
+          await this.sendErrorNotification(apiRequest, friendlyErrorMessage);
+
+          console.log(`❌ [BACKGROUND] Задача ${taskId} завершилась с ошибкой после ${this.MAX_RETRY_ATTEMPTS} попыток: ${result.error}`);
+
+        } else {
+          // Обычная ошибка - помечаем для повторной попытки
+          const friendlyErrorMessage = ErrorMessageTranslator.getFriendlyErrorMessage(
+            result.error || 'Ошибка фоновой обработки'
+          );
+          
+          await apiRequest.update({
+            status: 'pending_background_retry',
+            error_message: friendlyErrorMessage
+          });
+
+          console.log(`🔄 [BACKGROUND] Задача ${taskId} помечена для повторной попытки: ${result.error}`);
+        }
       }
 
     } catch (error) {
       console.error(`💥 [BACKGROUND] Критическая ошибка при обработке задачи ${taskId}:`, error);
 
-      // Помечаем задачу как failed
-      await apiRequest.update({
-        status: 'failed',
-        error_message: `Критическая ошибка: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        completed_date: new Date()
-      });
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const friendlyErrorMessage = ErrorMessageTranslator.getFriendlyErrorMessage(errorMessage);
 
-      // Отправляем уведомление об ошибке
-      await this.sendErrorNotification(apiRequest, 'Произошла критическая ошибка при обработке');
+      if (currentRetryCount + 1 >= this.MAX_RETRY_ATTEMPTS) {
+        // Достигнуто максимальное количество попыток
+        await apiRequest.update({
+          status: 'failed',
+          error_message: friendlyErrorMessage,
+          completed_date: new Date()
+        });
+
+        // Обновляем связанную фотографию, если есть
+        if (apiRequest.photo_id) {
+          await Photo.update(
+            { 
+              status: 'failed',
+              error_message: friendlyErrorMessage
+            },
+            { where: { id: apiRequest.photo_id } }
+          );
+        }
+
+        // Отправляем уведомление об ошибке
+        await this.sendErrorNotification(apiRequest, friendlyErrorMessage);
+      } else {
+        // Помечаем для повторной попытки
+        await apiRequest.update({
+          status: 'pending_background_retry',
+          error_message: friendlyErrorMessage
+        });
+      }
     } finally {
       this.processingCount--;
     }
@@ -243,7 +341,8 @@ export class BackgroundTaskProcessor {
         eraId: requestData.eraId,
         prompt: apiRequest.prompt || requestData.prompt || '',
         originalFilename: requestData.originalFilename,
-        adminRetry: false // В фоне списываем баланс
+        adminRetry: false, // В фоне списываем баланс
+        existingApiRequestId: apiRequest.id // Передаем ID существующего запроса
       });
 
       return {
@@ -398,6 +497,43 @@ export class BackgroundTaskProcessor {
       }
     } catch (error) {
       console.error('❌ [BACKGROUND] Ошибка при отправке уведомления об ошибке:', error);
+    }
+  }
+
+  /**
+   * Отправить уведомление о блокировке безопасности
+   */
+  private static async sendSafetyBlockNotification(apiRequest: ApiRequest, blockReason: string): Promise<void> {
+    try {
+      const user = (apiRequest as any).user;
+      if (user?.telegram_id) {
+        let message = '';
+        
+        switch (blockReason) {
+          case 'CONTENT_SAFETY_VIOLATION':
+            message = '🚫 К сожалению, это изображение не может быть обработано по соображениям безопасности. Пожалуйста, выберите другое фото.';
+            break;
+          case 'COPYRIGHT_VIOLATION':
+            message = '🚫 Изображение не может быть обработано из-за нарушения авторских прав. Пожалуйста, используйте другое изображение.';
+            break;
+          case 'SAFETY_AGREEMENT_REQUIRED':
+            message = '🚫 Необходимо согласие с правилами безопасности. Пожалуйста, ознакомьтесь с правилами и подтвердите согласие.';
+            break;
+          default:
+            message = '🚫 Изображение не может быть обработано. Пожалуйста, выберите другое фото.';
+        }
+
+        await TelegramBotService.sendTaskCompletionNotification(
+          user.telegram_id,
+          apiRequest.request_type,
+          undefined,
+          false,
+          message
+        );
+        console.log(`📤 [BACKGROUND] Уведомление о блокировке безопасности отправлено пользователю ${user.telegram_id}`);
+      }
+    } catch (error) {
+      console.error('❌ [BACKGROUND] Ошибка при отправке уведомления о блокировке:', error);
     }
   }
 

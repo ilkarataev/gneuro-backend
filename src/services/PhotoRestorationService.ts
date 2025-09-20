@@ -8,6 +8,8 @@ import { BalanceService } from './BalanceService';
 import { PriceService } from './PriceService';
 import { FileManagerService } from './FileManagerService';
 import { PromptService } from './PromptService';
+import { UserAgreementService } from './UserAgreementService';
+import { ErrorMessageTranslator } from '../utils/ErrorMessageTranslator';
 
 export interface RestorePhotoRequest {
   userId: number;
@@ -27,7 +29,9 @@ export interface RestorePhotoResult {
   photoId?: number;
   restoredUrl?: string;
   error?: string;
+  errorCode?: string;
   cost?: number;
+  safetyRules?: any;
 }
 
 export class PhotoRestorationService {
@@ -51,6 +55,17 @@ export class PhotoRestorationService {
    */
   static async restorePhoto(request: RestorePhotoRequest): Promise<RestorePhotoResult> {
     try {
+      // Проверяем согласие пользователя с правилами безопасности
+      const hasAgreed = await UserAgreementService.hasUserAgreedToSafetyRules(request.userId);
+      if (!hasAgreed) {
+        return {
+          success: false,
+          error: 'SAFETY_AGREEMENT_REQUIRED',
+          errorCode: 'SAFETY_AGREEMENT_REQUIRED',
+          safetyRules: UserAgreementService.getSafetyRules()
+        };
+      }
+
       // Получаем актуальную стоимость реставрации из БД
       const restorationCost = await this.getRestorationCost();
 
@@ -103,7 +118,7 @@ export class PhotoRestorationService {
           status: 'completed'
         });
 
-        // Списываем деньги с баланса
+        // Списываем деньги с баланса только при успешной обработке
         // Пропускаем списание при админском перезапуске
         if (!request.adminRetry) {
           await BalanceService.debitBalance({
@@ -128,28 +143,47 @@ export class PhotoRestorationService {
         // Ошибка при вызове API (включая retry)
         const errorMessage = apiError instanceof Error ? apiError.message : 'Ошибка API';
         
+        // Определяем статус и сообщение в зависимости от типа ошибки
+        let photoStatus = 'failed';
+        let userMessage = 'Сервис временно недоступен, попробуйте чуть позже';
+        
+        if (errorMessage === 'CONTENT_SAFETY_VIOLATION') {
+          photoStatus = 'completed'; // Помечаем как выполненное, но без результата
+          userMessage = ErrorMessageTranslator.translateErrorCode('CONTENT_SAFETY_VIOLATION');
+        } else if (errorMessage === 'COPYRIGHT_VIOLATION') {
+          photoStatus = 'completed';
+          userMessage = ErrorMessageTranslator.translateErrorCode('COPYRIGHT_VIOLATION');
+        } else {
+          // Для других ошибок также используем переводчик
+          userMessage = ErrorMessageTranslator.getFriendlyErrorMessage(errorMessage);
+        }
+        
         await photo.update({
-          status: 'failed',
-          error_message: errorMessage
+          status: photoStatus as any,
+          error_message: userMessage // Сохраняем понятное сообщение
         });
 
         await apiRequest.update({
-          status: 'failed',
-          error_message: errorMessage
+          status: photoStatus as any,
+          error_message: userMessage // Сохраняем понятное сообщение
         });
 
-        // Возвращаем более понятное сообщение пользователю
+        // Возвращаем соответствующее сообщение пользователю
         return { 
           success: false, 
-          error: 'Сервис временно недоступен, попробуйте чуть позже'
+          error: userMessage,
+          errorCode: errorMessage
         };
       }
 
     } catch (error) {
       console.error('Ошибка в restorePhoto:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const friendlyErrorMessage = ErrorMessageTranslator.getFriendlyErrorMessage(errorMessage);
+      
       return { 
         success: false, 
-        error: 'Сервис временно недоступен, попробуйте чуть позже'
+        error: friendlyErrorMessage
       };
     }
   }
@@ -222,10 +256,26 @@ export class PhotoRestorationService {
     const response = await Promise.race([apiPromise, timeoutPromise]) as any;
 
     console.log('📸 [GEMINI] Получен ответ от API');
+    console.log('📸 [GEMINI] Полный ответ API:', JSON.stringify(response, null, 2));
     console.log('📸 [GEMINI] Количество кандидатов:', response.candidates?.length || 0);
 
     if (response.candidates && response.candidates.length > 0) {
       const candidate = response.candidates[0];
+      console.log('📸 [GEMINI] Детали кандидата:', JSON.stringify(candidate, null, 2));
+      
+      // Проверяем finishReason для блокировок
+      if (candidate.finishReason === 'SAFETY' || candidate.finishReason === 'IMAGE_SAFETY') {
+        console.log('🚫 [GEMINI] Запрос заблокирован по соображениям безопасности');
+        console.log('🚫 [GEMINI] Finish reason:', candidate.finishReason);
+        console.log('🚫 [GEMINI] Safety ratings:', candidate.safetyRatings);
+        throw new Error('CONTENT_SAFETY_VIOLATION');
+      }
+      
+      if (candidate.finishReason === 'RECITATION') {
+        console.log('🚫 [GEMINI] Запрос заблокирован из-за нарушения авторских прав');
+        throw new Error('COPYRIGHT_VIOLATION');
+      }
+      
       if (!candidate.content || !candidate.content.parts) {
         console.log('❌ [GEMINI] Неверная структура ответа - отсутствует content.parts');
         throw new Error('Неверная структура ответа API');
@@ -234,8 +284,19 @@ export class PhotoRestorationService {
       console.log('📸 [GEMINI] Количество частей контента:', candidate.content.parts.length);
 
       for (const part of candidate.content.parts) {
+        console.log('📸 [GEMINI] Обрабатываем часть:', JSON.stringify(part, null, 2));
+        
         if (part.text) {
           console.log('📸 [GEMINI] Найден текст:', part.text.substring(0, 100) + '...');
+          // Проверяем, не содержит ли текст сообщение об ошибке или блокировке
+          if (part.text.toLowerCase().includes('inappropriate') || 
+              part.text.toLowerCase().includes('safety') || 
+              part.text.toLowerCase().includes('minor') ||
+              part.text.toLowerCase().includes('cannot') ||
+              part.text.toLowerCase().includes('error')) {
+            console.log('🚫 [GEMINI] API вернул сообщение об ошибке безопасности:', part.text);
+            throw new Error('CONTENT_SAFETY_VIOLATION');
+          }
         } else if (part.inlineData && part.inlineData.data) {
           console.log('✅ [GEMINI] Найдено изображение, MIME:', part.inlineData.mimeType);
           

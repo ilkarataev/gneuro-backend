@@ -8,6 +8,7 @@ import { BalanceService } from './BalanceService';
 import { PriceService } from './PriceService';
 import { FileManagerService } from './FileManagerService';
 import { PromptService } from './PromptService';
+import { ErrorMessageTranslator } from '../utils/ErrorMessageTranslator';
 
 export interface StylizePhotoRequest {
   userId: number;
@@ -299,24 +300,30 @@ export class PhotoStylizationService {
           };
         } else {
           // Если ошибка критическая, помечаем как failed
+          const errorMessage = processingError instanceof Error ? processingError.message : 'Unknown error';
+          const friendlyErrorMessage = ErrorMessageTranslator.getFriendlyErrorMessage(errorMessage);
+          
           await apiRequest.update({
             status: 'failed',
-            error_message: processingError instanceof Error ? processingError.message : 'Unknown error',
+            error_message: friendlyErrorMessage,
             completed_date: new Date()
           });
 
           return {
             success: false,
-            error: 'Сервис временно недоступен, попробуйте чуть позже'
+            error: friendlyErrorMessage
           };
         }
       }
 
     } catch (error) {
       console.error('💥 [STYLIZE] Критическая ошибка стилизации:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const friendlyErrorMessage = ErrorMessageTranslator.getFriendlyErrorMessage(errorMessage);
+      
       return {
         success: false,
-        error: 'Сервис временно недоступен, попробуйте чуть позже'
+        error: friendlyErrorMessage
       };
     }
   }
@@ -381,6 +388,19 @@ export class PhotoStylizationService {
       
       if (response.candidates && response.candidates.length > 0) {
         const candidate = response.candidates[0];
+        
+        // Проверяем finishReason для блокировок
+        if (candidate.finishReason === 'SAFETY' || candidate.finishReason === 'IMAGE_SAFETY') {
+          console.log('🚫 [GEMINI] Запрос заблокирован по соображениям безопасности');
+          console.log('🚫 [GEMINI] Finish reason:', candidate.finishReason);
+          throw new Error('CONTENT_SAFETY_VIOLATION');
+        }
+        
+        if (candidate.finishReason === 'RECITATION') {
+          console.log('🚫 [GEMINI] Запрос заблокирован из-за нарушения авторских прав');
+          throw new Error('COPYRIGHT_VIOLATION');
+        }
+        
         if (candidate.content && candidate.content.parts) {
           for (const part of candidate.content.parts) {
             if (part.inlineData && part.inlineData.data) {

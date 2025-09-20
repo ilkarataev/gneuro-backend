@@ -1,5 +1,6 @@
 import { Sequelize, DataTypes, Model, Optional } from 'sequelize';
 import dotenv from 'dotenv';
+import { initUserAgreement, UserAgreementAttributes } from './UserAgreement';
 
 // Загружаем переменные среды
 dotenv.config();
@@ -81,11 +82,12 @@ interface ApiRequestAttributes {
   request_date: Date;
   completed_date?: Date;
   error_message?: string;
+  retry_count: number;
   createdAt: Date;
   updatedAt: Date;
 }
 
-interface ApiRequestCreationAttributes extends Optional<ApiRequestAttributes, 'id' | 'request_date' | 'createdAt' | 'updatedAt'> {}
+interface ApiRequestCreationAttributes extends Optional<ApiRequestAttributes, 'id' | 'request_date' | 'retry_count' | 'createdAt' | 'updatedAt'> {}
 
 interface ServicePriceAttributes {
   id: number;
@@ -199,6 +201,7 @@ class ApiRequest extends Model<ApiRequestAttributes, ApiRequestCreationAttribute
   public request_date!: Date;
   public completed_date?: Date;
   public error_message?: string;
+  public retry_count!: number;
 
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
@@ -482,6 +485,11 @@ ApiRequest.init({
     type: DataTypes.TEXT,
     allowNull: true
   },
+  retry_count: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 0
+  },
   createdAt: {
     type: DataTypes.DATE,
     allowNull: false,
@@ -653,6 +661,9 @@ Poet.init({
   updatedAt: 'updated_at'
 });
 
+// Инициализация UserAgreement
+const UserAgreement = initUserAgreement(sequelize);
+
 // Связи между моделями
 User.hasMany(Payment, { foreignKey: 'user_id', as: 'payments' });
 Payment.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
@@ -666,4 +677,7 @@ ApiRequest.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 Photo.hasMany(ApiRequest, { foreignKey: 'photo_id', as: 'requests' });
 ApiRequest.belongsTo(Photo, { foreignKey: 'photo_id', as: 'photo' });
 
-export { sequelize, User, Payment, Photo, ApiRequest, ServicePrice, Prompt, Poet };
+User.hasMany(UserAgreement, { foreignKey: 'user_id', as: 'agreements' });
+UserAgreement.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+
+export { sequelize, User, Payment, Photo, ApiRequest, ServicePrice, Prompt, Poet, UserAgreement, UserAgreementAttributes };

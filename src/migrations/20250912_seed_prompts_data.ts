@@ -154,7 +154,7 @@ const up = async (queryInterface: QueryInterface): Promise<void> => {
       key: 'photo_restoration_base',
       name: 'Базовый промпт для реставрации фото',
       description: 'Основной промпт для восстановления старых и поврежденных фотографий',
-      content: 'get colours, remove imperfections, get  quality photo.',
+      content: 'Analyze this image for restoration. If the image contains inappropriate content, minors in compromising situations, or violates safety guidelines, do not process it and return an error message. Otherwise, restore the image by getting colors, removing imperfections, and improving quality while maintaining the original composition and subject matter.',
       category: 'photo_restoration',
       variables: JSON.stringify({}),
       is_active: true,

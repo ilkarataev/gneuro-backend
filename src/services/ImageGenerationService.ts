@@ -4,6 +4,7 @@ import { BalanceService } from './BalanceService';
 import { PriceService } from './PriceService';
 import { FileManagerService } from './FileManagerService';
 import { PromptService } from './PromptService';
+import { ErrorMessageTranslator } from '../utils/ErrorMessageTranslator';
 
 export interface GenerateImageRequest {
   userId: number;
@@ -253,45 +254,56 @@ export class ImageGenerationService {
           };
         } else {
           // Обновляем статус на failed
+          const errorMessage = response.error || 'Неизвестная ошибка генерации';
+          const friendlyErrorMessage = ErrorMessageTranslator.getFriendlyErrorMessage(errorMessage);
+          
           await photo.update({
             status: 'failed',
-            error_message: response.error || 'Неизвестная ошибка генерации'
+            error_message: friendlyErrorMessage
           });
 
           await apiRequest.update({
             status: 'failed',
-            response_data: JSON.stringify(response)
+            response_data: JSON.stringify(response),
+            error_message: friendlyErrorMessage
           });
 
           return { 
             success: false, 
-            error: response.error || 'Ошибка при генерации изображения'
+            error: friendlyErrorMessage
           };
         }
       } catch (error) {
         console.error('❌ [IMAGE_GEN] Ошибка при вызове API:', error);
         
         // Обновляем статус на failed
+        const errorMessage = error instanceof Error ? error.message : 'Неизвестная ошибка';
+        const friendlyErrorMessage = ErrorMessageTranslator.getFriendlyErrorMessage(errorMessage);
+        
         await photo.update({
           status: 'failed',
-          error_message: error instanceof Error ? error.message : 'Неизвестная ошибка'
+          error_message: friendlyErrorMessage
         });
 
         await apiRequest.update({
           status: 'failed',
-          response_data: JSON.stringify({ error: error instanceof Error ? error.message : 'Неизвестная ошибка' })
+          response_data: JSON.stringify({ error: errorMessage }),
+          error_message: friendlyErrorMessage
         });
 
         return { 
           success: false, 
-          error: error instanceof Error ? error.message : 'Ошибка при генерации изображения'
+          error: friendlyErrorMessage
         };
       }
     } catch (error) {
       console.error('❌ [IMAGE_GEN] Общая ошибка:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Внутренняя ошибка сервера';
+      const friendlyErrorMessage = ErrorMessageTranslator.getFriendlyErrorMessage(errorMessage);
+      
       return { 
         success: false, 
-        error: error instanceof Error ? error.message : 'Внутренняя ошибка сервера'
+        error: friendlyErrorMessage
       };
     }
   }
@@ -391,48 +403,59 @@ export class ImageGenerationService {
           };
         } else {
           // Обновляем статус на failed
+          const errorMessage = response.error || 'Неизвестная ошибка генерации';
+          const friendlyErrorMessage = ErrorMessageTranslator.getFriendlyErrorMessage(errorMessage);
+          
           await photo.update({
             status: 'failed',
-            error_message: response.error || 'Неизвестная ошибка генерации'
+            error_message: friendlyErrorMessage
           });
 
           await apiRequest.update({
             status: 'failed',
-            response_data: JSON.stringify(response)
+            response_data: JSON.stringify(response),
+            error_message: friendlyErrorMessage
           });
 
           return { 
             success: false, 
-            error: response.error || 'Ошибка при генерации изображения',
-            message: response.error || 'Ошибка при генерации изображения'
+            error: friendlyErrorMessage,
+            message: friendlyErrorMessage
           };
         }
       } catch (error) {
         console.error('❌ [IMAGE_GEN_IMG2IMG] Ошибка при вызове API:', error);
         
         // Обновляем статус на failed
+        const errorMessage = error instanceof Error ? error.message : 'Неизвестная ошибка';
+        const friendlyErrorMessage = ErrorMessageTranslator.getFriendlyErrorMessage(errorMessage);
+        
         await photo.update({
           status: 'failed',
-          error_message: error instanceof Error ? error.message : 'Неизвестная ошибка'
+          error_message: friendlyErrorMessage
         });
 
         await apiRequest.update({
           status: 'failed',
-          response_data: JSON.stringify({ error: error instanceof Error ? error.message : 'Неизвестная ошибка' })
+          response_data: JSON.stringify({ error: errorMessage }),
+          error_message: friendlyErrorMessage
         });
 
         return { 
           success: false, 
-          error: error instanceof Error ? error.message : 'Ошибка при генерации изображения',
-          message: error instanceof Error ? error.message : 'Ошибка при генерации изображения'
+          error: friendlyErrorMessage,
+          message: friendlyErrorMessage
         };
       }
     } catch (error) {
       console.error('❌ [IMAGE_GEN_IMG2IMG] Общая ошибка:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Внутренняя ошибка сервера';
+      const friendlyErrorMessage = ErrorMessageTranslator.getFriendlyErrorMessage(errorMessage);
+      
       return { 
         success: false, 
-        error: error instanceof Error ? error.message : 'Внутренняя ошибка сервера',
-        message: error instanceof Error ? error.message : 'Внутренняя ошибка сервера'
+        error: friendlyErrorMessage,
+        message: friendlyErrorMessage
       };
     }
   }
@@ -449,9 +472,12 @@ export class ImageGenerationService {
       return result;
     } catch (error) {
       console.error('❌ [IMAGE_GEN] Финальная ошибка после всех попыток:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Неизвестная ошибка API';
+      const friendlyErrorMessage = ErrorMessageTranslator.getFriendlyErrorMessage(errorMessage);
+      
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Неизвестная ошибка API'
+        error: friendlyErrorMessage
       };
     }
   }
@@ -488,6 +514,19 @@ export class ImageGenerationService {
 
     if (response.candidates && response.candidates.length > 0) {
       const candidate = response.candidates[0];
+      
+      // Проверяем finishReason для блокировок
+      if (candidate.finishReason === 'SAFETY' || candidate.finishReason === 'IMAGE_SAFETY') {
+        console.log('🚫 [IMAGE_GEN] Запрос заблокирован по соображениям безопасности');
+        console.log('🚫 [IMAGE_GEN] Finish reason:', candidate.finishReason);
+        throw new Error('CONTENT_SAFETY_VIOLATION');
+      }
+      
+      if (candidate.finishReason === 'RECITATION') {
+        console.log('🚫 [IMAGE_GEN] Запрос заблокирован из-за нарушения авторских прав');
+        throw new Error('COPYRIGHT_VIOLATION');
+      }
+      
       if (!candidate.content || !candidate.content.parts) {
         console.log('❌ [IMAGE_GEN] Неверная структура ответа - отсутствует content.parts');
         throw new Error('Неверная структура ответа API');
@@ -592,9 +631,12 @@ export class ImageGenerationService {
       return result;
     } catch (error) {
       console.error('❌ [IMAGE_GEN_IMG2IMG] Финальная ошибка после всех попыток:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Неизвестная ошибка API';
+      const friendlyErrorMessage = ErrorMessageTranslator.getFriendlyErrorMessage(errorMessage);
+      
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Неизвестная ошибка API'
+        error: friendlyErrorMessage
       };
     }
   }
@@ -658,6 +700,19 @@ export class ImageGenerationService {
 
     if (response.candidates && response.candidates.length > 0) {
       const candidate = response.candidates[0];
+      
+      // Проверяем finishReason для блокировок
+      if (candidate.finishReason === 'SAFETY' || candidate.finishReason === 'IMAGE_SAFETY') {
+        console.log('🚫 [IMAGE_GEN_IMG2IMG] Запрос заблокирован по соображениям безопасности');
+        console.log('🚫 [IMAGE_GEN_IMG2IMG] Finish reason:', candidate.finishReason);
+        throw new Error('CONTENT_SAFETY_VIOLATION');
+      }
+      
+      if (candidate.finishReason === 'RECITATION') {
+        console.log('🚫 [IMAGE_GEN_IMG2IMG] Запрос заблокирован из-за нарушения авторских прав');
+        throw new Error('COPYRIGHT_VIOLATION');
+      }
+      
       if (!candidate.content || !candidate.content.parts) {
         console.log('❌ [IMAGE_GEN_IMG2IMG] Неверная структура ответа - отсутствует content.parts');
         throw new Error('Неверная структура ответа API');

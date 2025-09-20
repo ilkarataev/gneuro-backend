@@ -6,6 +6,7 @@ import { FileManagerService } from './FileManagerService';
 import { PromptService } from './PromptService';
 import { PhotoRestorationService } from './PhotoRestorationService';
 import { ImageCopyService } from './ImageCopyService';
+import { ErrorMessageTranslator } from '../utils/ErrorMessageTranslator';
 
 export interface PoetStyleRequest {
   userId: number;
@@ -296,48 +297,59 @@ export class PoetStyleService {
           };
         } else {
           // Обновляем статус на failed
+          const errorMessage = response.error || 'Неизвестная ошибка стилизации';
+          const friendlyErrorMessage = ErrorMessageTranslator.getFriendlyErrorMessage(errorMessage);
+          
           await photo.update({
             status: 'failed',
-            error_message: response.error || 'Неизвестная ошибка стилизации'
+            error_message: friendlyErrorMessage
           });
 
           await apiRequest.update({
             status: 'failed',
-            response_data: JSON.stringify(response)
+            response_data: JSON.stringify(response),
+            error_message: friendlyErrorMessage
           });
 
           return { 
             success: false, 
-            error: response.error || 'Ошибка при стилизации фото',
-            message: response.error || 'Ошибка при стилизации фото'
+            error: friendlyErrorMessage,
+            message: friendlyErrorMessage
           };
         }
       } catch (error) {
         console.error('❌ [POET_STYLE] Ошибка при вызове API:', error);
         
         // Обновляем статус на failed
+        const errorMessage = error instanceof Error ? error.message : 'Неизвестная ошибка';
+        const friendlyErrorMessage = ErrorMessageTranslator.getFriendlyErrorMessage(errorMessage);
+        
         await photo.update({
           status: 'failed',
-          error_message: error instanceof Error ? error.message : 'Неизвестная ошибка'
+          error_message: friendlyErrorMessage
         });
 
         await apiRequest.update({
           status: 'failed',
-          response_data: JSON.stringify({ error: error instanceof Error ? error.message : 'Неизвестная ошибка' })
+          response_data: JSON.stringify({ error: errorMessage }),
+          error_message: friendlyErrorMessage
         });
 
         return { 
           success: false, 
-          error: error instanceof Error ? error.message : 'Ошибка при стилизации фото',
-          message: error instanceof Error ? error.message : 'Ошибка при стилизации фото'
+          error: friendlyErrorMessage,
+          message: friendlyErrorMessage
         };
       }
     } catch (error) {
       console.error('❌ [POET_STYLE] Общая ошибка:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Внутренняя ошибка сервера';
+      const friendlyErrorMessage = ErrorMessageTranslator.getFriendlyErrorMessage(errorMessage);
+      
       return { 
         success: false, 
-        error: error instanceof Error ? error.message : 'Внутренняя ошибка сервера',
-        message: error instanceof Error ? error.message : 'Внутренняя ошибка сервера'
+        error: friendlyErrorMessage,
+        message: friendlyErrorMessage
       };
     }
   }
@@ -438,6 +450,19 @@ export class PoetStyleService {
 
     if (response.candidates && response.candidates.length > 0) {
       const candidate = response.candidates[0];
+      
+      // Проверяем finishReason для блокировок
+      if (candidate.finishReason === 'SAFETY' || candidate.finishReason === 'IMAGE_SAFETY') {
+        console.log('🚫 [POET_STYLE] Запрос заблокирован по соображениям безопасности');
+        console.log('🚫 [POET_STYLE] Finish reason:', candidate.finishReason);
+        throw new Error('CONTENT_SAFETY_VIOLATION');
+      }
+      
+      if (candidate.finishReason === 'RECITATION') {
+        console.log('🚫 [POET_STYLE] Запрос заблокирован из-за нарушения авторских прав');
+        throw new Error('COPYRIGHT_VIOLATION');
+      }
+      
       if (!candidate.content || !candidate.content.parts) {
         console.log('❌ [POET_STYLE] Неверная структура ответа - отсутствует content.parts');
         throw new Error('Неверная структура ответа API');
